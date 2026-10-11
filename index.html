@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Onboard Memory Manager (Web)</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1><span class="logo">G</span> Onboard Memory Manager <small>Web</small></h1>
+    <div id="device"></div>
+    <button id="btn-disconnect" class="ghost" hidden>연결 해제</button>
+  </header>
+
+  <main>
+    <section id="welcome">
+      <h2>기기를 연결하세요</h2>
+      <p>Logitech G 마우스의 온보드 메모리에 저장된 프로필(DPI, 보고율, 버튼 할당)을 브라우저에서 바로 읽고 수정합니다.</p>
+      <p id="unsupported" class="notice" hidden>이 브라우저는 WebHID를 지원하지 않습니다. 데스크톱용 Chrome, Edge 또는 Opera에서 열어 주세요.</p>
+      <div class="welcome-actions">
+        <button class="btn-connect primary">기기 연결</button>      </div>
+      <ul class="hint">
+        <li>G HUB나 Logitech Onboard Memory Manager가 실행 중이면 종료한 뒤 연결하세요.</li>
+        <li>무선 기기는 수신기(동글)를 선택하면 됩니다. 기기 전원이 켜져 있어야 합니다.</li>
+        <li>변경 내용은 「기기에 저장」을 누르기 전까지 기기에 기록되지 않습니다.</li>
+      </ul>
+    </section>
+
+    <div id="workspace" hidden>
+      <aside id="sidebar"></aside>
+      <section id="editor"></section>
+    </div>
+  </main>
+
+  <footer id="actionbar" hidden>
+    <span id="dirty-count"></span>
+    <span class="spacer"></span>
+    <button id="btn-diagnostics" class="ghost">진단 정보 내보내기</button>
+    <button id="btn-export">백업 내보내기</button>
+    <button id="btn-import">백업 불러오기</button>
+    <input id="import-file" type="file" accept="application/json,.json" hidden>
+    <button id="btn-revert">되돌리기</button>
+    <button id="btn-save" class="primary">기기에 저장</button>
+  </footer>
+
+  <dialog id="confirm">
+    <form method="dialog">
+      <h3 id="confirm-title"></h3>
+      <div id="confirm-body"></div>
+      <menu>
+        <button value="cancel">취소</button>
+        <button id="confirm-ok" value="ok" class="primary"></button>
+      </menu>
+    </form>
+  </dialog>
+
+  <div id="busy" hidden><div class="spinner"></div><span id="busy-msg"></span></div>
+  <div id="toasts"></div>
+
+  <script src="js/profile.js"></script>
+  <script src="js/hidpp.js"></script>
+  <script src="js/keys.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
