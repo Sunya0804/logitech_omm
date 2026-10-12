@@ -239,6 +239,17 @@
       return { min: Math.min(...values), max: Math.max(...values), step: minStep, segments };
     }
 
+    // 아날로그 버튼(0x1B0C)의 단계 수: {buttonMask, actuationMax, hapticMax, rtMax}. 미지원이거나 값이 이상하면 null.
+    // 응답: [버튼 비트맵(2, BE), 작동점 단계 << 2, 햅틱 단계 << 2, 래피드 트리거 단계 << 2, ...] (공식 OMM 2.7 기준)
+    async getAnalogCapabilities() {
+      const idx = await this.getFeature(FEATURE.ANALOG_BUTTONS);
+      if (!idx) return null;
+      const r = await this.request(idx, 0);
+      const caps = { buttonMask: (r[0] << 8) | r[1], actuationMax: r[2] >> 2, hapticMax: r[3] >> 2, rtMax: r[4] >> 2 };
+      const sane = caps.buttonMask && [caps.actuationMax, caps.hapticMax, caps.rtMax].every((v) => v >= 1);
+      return sane ? caps : null;
+    }
+
     // 확장 보고율(0x8061)이 지원하는 보고율 인덱스 목록 (인덱스 i = 125 << i Hz). 미지원이면 null.
     async getReportRateIndexes() {
       const idx = await this.getFeature(FEATURE.EXTENDED_REPORT_RATE);

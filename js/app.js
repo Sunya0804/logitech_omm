@@ -17,7 +17,7 @@
 
   const st = {
     transport: null, hidpp: null, op: null,
-    name: '', battery: null, desc: null, dpiRange: DEFAULT_DPI_RANGE, rateIndexes: null, layout: null,
+    name: '', battery: null, desc: null, dpiRange: DEFAULT_DPI_RANGE, rateIndexes: null, analogCaps: null, layout: null,
     profiles: [], dirValid: false, crcTrusted: false,
     current: 0, mode: OMM.MODE.ONBOARD,
     selected: 0, tab: 'dpi', layer: 'buttons', unlock: false, busy: false,
@@ -102,6 +102,7 @@
       st.battery = await hidpp.getBattery().catch(() => null);
       st.dpiRange = (await hidpp.getDpiRange().catch(() => null)) || DEFAULT_DPI_RANGE;
       st.rateIndexes = await hidpp.getReportRateIndexes().catch(() => null);
+      st.analogCaps = await hidpp.getAnalogCapabilities().catch(() => null);
       hidpp.onEvent = (idx, fn, params) => {
         if (idx !== featIdx || fn !== 0) return;
         st.current = (params[0] << 8) | params[1];
@@ -623,17 +624,19 @@
       h('p', { class: 'hint' }, '버튼 번호는 기기 내부 순서입니다. 보통 1=왼쪽, 2=오른쪽, 3=휠 클릭 순이며 나머지는 기기마다 다릅니다.'));
   }
 
-  // 아날로그 버튼(작동점, 래피드 트리거, 클릭 햅틱). 값의 실제 허용 범위는 기기가 정하는데 아직 읽어 오지 못하므로
-  // 저장 가능한 최대치(6비트)까지만 제한한다. 공식 OMM 기준 최솟값은 작동점 1, 래피드 트리거 1, 햅틱 0.
+  // 아날로그 버튼(작동점, 래피드 트리거, 클릭 햅틱). 허용 범위는 기기가 알려 주는 단계 수를 따르고
+  // (공식 OMM 기준 작동점 1~단계 수, 래피드 트리거 1~단계 수, 햅틱 0~단계 수), 그 값을 읽지 못하면 편집을 막는다.
   function renderAnalog(p) {
-    const ro = !canEdit();
+    const caps = st.analogCaps;
+    const ro = !canEdit() || !caps;
     const L = st.layout;
-    const slider = (label, value, min, disabled, onInput) => {
+    const slider = (label, value, min, max, disabled, onInput) => {
       const out = h('output', null, String(value));
       return h('div', { class: 'dpi-row' },
-        h('span', { class: 'analog-label' }, label),
+        h('span', { class: 'analog-label' }, max ? `${label} (${min}~${max})` : label),
         h('input', {
-          type: 'range', min, max: P.ANALOG_MAX, step: 1, value, disabled,
+          // 저장된 값이 범위를 벗어나 있어도 그대로 보여 준다.
+          type: 'range', min: Math.min(min, value), max: Math.max(max || P.ANALOG_MAX, value), step: 1, value, disabled,
           oninput: (e) => { out.textContent = e.target.value; onInput(Number(e.target.value)); touched(false); },
         }),
         out);
@@ -643,15 +646,17 @@
       const set = (patch) => P.setAnalog(p.raw, L, i, Object.assign(a, patch));
       return h('div', { class: 'analog' },
         h('h3', null, `아날로그 버튼 ${i + 1}`),
-        slider('작동점', a.actuation, 1, ro, (v) => set({ actuation: v })),
+        slider('작동점', a.actuation, 1, caps && caps.actuationMax, ro, (v) => set({ actuation: v })),
         h('label', { class: 'analog-toggle' },
           h('input', { type: 'checkbox', checked: a.rtEnabled, disabled: ro, onchange: (e) => { set({ rtEnabled: e.target.checked }); touched(true); } }),
           ' 래피드 트리거 사용'),
-        slider('래피드 트리거 민감도', a.rtSensitivity, 1, ro || !a.rtEnabled, (v) => set({ rtSensitivity: v })),
-        slider('클릭 햅틱 강도', a.haptic, 0, ro, (v) => set({ haptic: v })));
+        slider('래피드 트리거 민감도', a.rtSensitivity, 1, caps && caps.rtMax, ro || !a.rtEnabled, (v) => set({ rtSensitivity: v })),
+        slider('클릭 햅틱 강도', a.haptic, 0, caps && caps.hapticMax, ro, (v) => set({ haptic: v })));
     });
-    return h('div', null, sections,
-      h('p', { class: 'hint' }, '보통 버튼 1이 왼쪽, 버튼 2가 오른쪽입니다. 숫자는 기기에 저장되는 단계 값이며, 기기가 허용하는 최댓값은 기종마다 다릅니다. 현재 값에서 조금씩 바꿔 보세요.'));
+    return h('div', null,
+      !caps && h('div', { class: 'notice' }, '기기에서 아날로그 버튼의 허용 범위를 읽지 못해 값을 바꿀 수 없습니다. 현재 저장된 값만 표시합니다.'),
+      sections,
+      h('p', { class: 'hint' }, '보통 버튼 1이 왼쪽, 버튼 2가 오른쪽입니다. 범위는 기기가 알려 준 단계 수입니다.'));
   }
 
   function renderInfo(p) {

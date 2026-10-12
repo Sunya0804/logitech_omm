@@ -18,7 +18,7 @@
     },
     analog: {
       name: 'OMM Demo Mouse S', formatId: 8, buttonCount: 5,
-      features: [0x0000, 0x0005, 0x8100, 0x2202, 0x1004, 0x8061],
+      features: [0x0000, 0x0005, 0x8100, 0x2202, 0x1004, 0x8061, 0x1b0c],
     },
   };
 
@@ -121,6 +121,9 @@
           break;
         case 0x1004:
           if (fn === 1) return [87, 0x08, 0];
+          break;
+        case 0x1b0c:
+          if (fn === 0) return [0x00, 0x03, 10 << 2, 8 << 2, 10 << 2, 0]; // 버튼 2개, 작동점 10 / 햅틱 8 / 래피드 트리거 10단계 (임의 값)
           break;
         case 0x8100:
           return this._onboard(fn, p);
