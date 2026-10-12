@@ -400,7 +400,9 @@
     const b = st.battery;
     bar.replaceChildren(
       h('strong', null, st.name),
-      b && h('span', { class: 'chip' }, `배터리 ${b.percent}%${b.charging ? ' ⚡' : ''}`),
+      b && h('span', { class: 'chip', title: '배터리' },
+        h('span', { class: 'battery' + (b.percent <= 20 ? ' low' : '') }, h('i', { style: `width:${Math.min(100, b.percent)}%` })),
+        `${b.percent}%${b.charging ? ' ⚡' : ''}`),
       h('label', { class: 'chip' }, '모드 ',
         h('select', { onchange: (e) => setMode(Number(e.target.value)) },
           h('option', { value: OMM.MODE.ONBOARD, selected: st.mode === OMM.MODE.ONBOARD }, '온보드 메모리'),
@@ -425,7 +427,7 @@
               p.source === 'rom' ? ' · 초기값' : '',
             ].join(''))),
         h('input', {
-          type: 'checkbox', title: '프로필 사용', checked: p.enabled, disabled: !p.raw || !canEdit(),
+          type: 'checkbox', class: 'switch', title: '프로필 사용', checked: p.enabled, disabled: !p.raw || !canEdit(),
           onclick: (e) => e.stopPropagation(),
           onchange: (e) => { p.enabled = e.target.checked; render(); },
         }))),

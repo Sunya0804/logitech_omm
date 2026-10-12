@@ -93,7 +93,7 @@
   // ---------- 화면 ----------
 
   const state = { threshold: DEFAULT_THRESHOLD_MS, buttons: [], wheel: null, rate: null, log: [] };
-  const els = { tiles: [], stats: [] };
+  const els = { parts: [], stats: [] };
   const ms = (v) => (v === null ? '–' : `${v < 10 ? v.toFixed(1) : Math.round(v)} ms`);
 
   function reset() {
@@ -120,7 +120,8 @@
 
   function update() {
     state.buttons.forEach((s, i) => {
-      els.tiles[i].className = 'test-tile' + (s.down ? ' down' : '') + (s.suspects ? ' bad' : s.presses ? ' seen' : '');
+      // SVG 요소는 className에 문자열을 대입할 수 없다.
+      els.parts[i].setAttribute('class', 'part' + (s.down ? ' down' : '') + (s.suspects ? ' bad' : s.presses ? ' seen' : ''));
       const [presses, suspects, gap, hold] = els.stats[i];
       presses.textContent = s.presses;
       suspects.textContent = s.suspects;
@@ -191,14 +192,40 @@
     update();
   }
 
+  function svg(tag, attrs, ...kids) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+    el.append(...kids);
+    return el;
+  }
+
+  // 위에서 내려다본 마우스 그림. 버튼 다섯 개가 눌리면 색이 바뀐다. parts의 순서는 MouseEvent.button과 같다.
+  function buildMouse() {
+    const part = (attrs) => svg('path', { class: 'part', ...attrs });
+    els.parts = [
+      part({ d: 'M96 14 C58 16 32 42 32 86 V128 H96 Z' }), // 왼쪽
+      svg('rect', { class: 'part', x: 90, y: 44, width: 20, height: 52, rx: 10 }), // 휠 클릭
+      part({ d: 'M104 14 C142 16 168 42 168 86 V128 H104 Z' }), // 오른쪽
+      svg('rect', { class: 'part', x: 16, y: 178, width: 16, height: 40, rx: 7 }), // 뒤로
+      svg('rect', { class: 'part', x: 16, y: 132, width: 16, height: 40, rx: 7 }), // 앞으로
+    ];
+    const [left, wheel, right, back, forward] = els.parts;
+    return svg('svg', { class: 'mouse', viewBox: '0 0 200 300', role: 'img', 'aria-label': '마우스 버튼 상태' },
+      svg('rect', { class: 'body', x: 32, y: 14, width: 136, height: 272, rx: 68 }),
+      left, right, back, forward, wheel,
+      svg('text', { x: 64, y: 82 }, '왼쪽'),
+      svg('text', { x: 136, y: 82 }, '오른쪽'),
+      svg('text', { x: 100, y: 200 }, '◀ 앞으로 / 뒤로'));
+  }
+
   function build(root) {
     const statCells = () => [h('td', null), h('td', null), h('td', null), h('td', null)];
     els.stats = BUTTON_NAMES.map(statCells);
-    els.tiles = BUTTON_NAMES.map((name) => h('div', { class: 'test-tile' }, name));
     els.wheelMark = h('span', { class: 'wheel-mark' }, '•');
     els.verdict = h('div', { class: 'test-verdict' });
     els.log = h('ul', { class: 'test-log' });
     const cell = (key) => (els[key] = h('td', null));
+    const rate = (key, label) => h('div', null, h('small', null, label), (els[key] = h('b', null, '–')));
 
     const pad = h('div', {
       class: 'test-pad', tabindex: 0,
@@ -208,7 +235,7 @@
       ondblclick: (e) => e.preventDefault(),
     },
       h('p', { class: 'test-pad-title' }, '이 영역 위에서 클릭하고 휠을 굴리세요'),
-      h('div', { class: 'test-tiles' }, els.tiles),
+      buildMouse(),
       h('div', { class: 'test-wheel' }, '휠 ', els.wheelMark));
     pad.addEventListener('wheel', onWheel, { passive: false });
 
@@ -223,30 +250,33 @@
     root.replaceChildren(
       h('div', { class: 'test-head' },
         h('div', null,
-          h('h2', null, '마우스 테스트'),
+          h('h2', null, '입력 검사'),
           h('p', { class: 'hint' }, '더블클릭(채터링), 버튼, 휠 이상을 검사하고 보고율을 측정합니다. 기기 연결 없이 어떤 마우스에서도 쓸 수 있습니다.')),
         h('button', { onclick: reset }, '기록 지우기')),
+      els.verdict,
       h('div', { class: 'test-layout' },
-        h('div', null, pad, els.verdict),
+        h('div', null, pad),
         h('div', null,
-          h('h3', null, '버튼'),
-          h('table', { class: 'test-table' },
-            h('thead', null, h('tr', null, ['버튼', '클릭', '의심', '최소 재입력 간격', '최단 누름'].map((t) => h('th', null, t)))),
-            h('tbody', null, BUTTON_NAMES.map((name, i) => h('tr', null, h('th', null, name), els.stats[i])))),
-          h('h3', null, '휠'),
-          h('table', { class: 'test-table' },
-            h('thead', null, h('tr', null, ['위로', '아래로', '틸트 좌 / 우', '역방향 튐'].map((t) => h('th', null, t)))),
-            h('tbody', null, h('tr', null, cell('wheelUp'), cell('wheelDown'), cell('wheelTilt'), cell('wheelRev')))),
-          h('h3', null, '보고율'),
-          h('table', { class: 'test-table' },
-            h('thead', null, h('tr', null, ['현재', '최고', '추정 설정값'].map((t) => h('th', null, t)))),
-            h('tbody', null, h('tr', null, cell('rateNow'), cell('ratePeak'), cell('rateGuess')))),
-          h('div', { class: 'field test-threshold' },
-            h('label', { for: 'test-threshold' }, '판정 기준'),
-            threshold,
-            h('span', { class: 'hint' }, 'ms 이내에 다시 눌리면 의심으로 기록')),
-          h('h3', null, '의심 기록'),
-          els.log)),
+          h('section', { class: 'test-card' },
+            h('h3', null, '보고율'),
+            h('div', { class: 'test-rate' }, rate('rateNow', '현재'), rate('ratePeak', '최고'), rate('rateGuess', '추정 설정값'))),
+          h('section', { class: 'test-card' },
+            h('h3', null, '버튼'),
+            h('table', { class: 'test-table' },
+              h('thead', null, h('tr', null, ['버튼', '클릭', '의심', '최소 재입력 간격', '최단 누름'].map((t) => h('th', null, t)))),
+              h('tbody', null, BUTTON_NAMES.map((name, i) => h('tr', null, h('th', null, name), els.stats[i])))),
+            h('div', { class: 'field test-threshold' },
+              h('label', { for: 'test-threshold' }, '판정 기준'),
+              threshold,
+              h('span', { class: 'hint' }, 'ms 이내에 다시 눌리면 의심으로 기록'))),
+          h('section', { class: 'test-card' },
+            h('h3', null, '휠'),
+            h('table', { class: 'test-table' },
+              h('thead', null, h('tr', null, ['위로', '아래로', '틸트 좌 / 우', '역방향 튐'].map((t) => h('th', null, t)))),
+              h('tbody', null, h('tr', null, cell('wheelUp'), cell('wheelDown'), cell('wheelTilt'), cell('wheelRev'))))),
+          h('section', { class: 'test-card' },
+            h('h3', null, '의심 기록'),
+            els.log))),
       h('ul', { class: 'hint' },
         h('li', null, '더블클릭 검사: 각 버튼을 평소처럼 한 번씩 30회 이상 누릅니다. 일부러 빠르게 연타하면 정상 마우스도 의심으로 잡힐 수 있으니, 그럴 때는 판정 기준을 낮추세요.'),
         h('li', null, '드래그 끊김 검사: 버튼을 몇 초간 누르고 있습니다. 누르는 도중 입력이 끊겼다 이어지면 의심으로 기록됩니다.'),
@@ -262,6 +292,7 @@
   function setView(view) {
     document.body.classList.toggle('view-test', view === 'test');
     for (const btn of document.querySelectorAll('#views button')) btn.classList.toggle('active', btn.dataset.view === view);
+    document.querySelector('#page-title').textContent = view === 'test' ? '마우스 테스트' : '기기 설정';
   }
 
   function init() {
