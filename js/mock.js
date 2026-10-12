@@ -53,7 +53,7 @@
       + '8001000180010002800100048001000880010010'));
     s.set(P.fromHex('0300000000001f400000000300000000001f400000000300000000001f403200000300000000001f4032000003'), 208);
     P.setDpi(s, L, dpis.map((x) => ({ x, y: x, lod: 2 })), 0, 0);
-    if (analog) for (const i of [0, 1]) P.setAnalog(s, P.LAYOUTS.analog, i, { actuation: 6, rtEnabled: i === 0, rtSensitivity: 3, haptic: 4 });
+    if (analog) for (const i of [0, 1]) P.setAnalog(s, P.LAYOUTS.analog, i, { actuation: 5, rtEnabled: i === 0, rtSensitivity: 3, haptic: 3 });
     return P.finalize(s);
   }
 
@@ -123,7 +123,7 @@
           if (fn === 1) return [87, 0x08, 0];
           break;
         case 0x1b0c:
-          if (fn === 0) return [0x00, 0x03, 10 << 2, 8 << 2, 10 << 2, 0]; // 버튼 2개, 작동점 10 / 햅틱 8 / 래피드 트리거 10단계 (임의 값)
+          if (fn === 0) return [0x00, 0x03, 10 << 2, 5 << 2, 5 << 2, 0]; // 버튼 2개, 작동점 10 / 햅틱 5 / 래피드 트리거 5단계
           break;
         case 0x8100:
           return this._onboard(fn, p);

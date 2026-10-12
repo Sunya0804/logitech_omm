@@ -13,6 +13,8 @@
   const EXTENDED_RATE_INDEXES = [0, 1, 2, 3, 4, 5, 6]; // 값 = 인덱스, 125 << i Hz
   const DEFAULT_DPI_RANGE = { min: 100, max: 25600, step: 50 };
   const ROM_BASE = 0x0100;
+  // 기기가 아날로그 버튼의 단계 수를 알려 주지 않을 때 쓰는 값 (PRO X2 SUPERSTRIKE의 G HUB 기준)
+  const DEFAULT_ANALOG_CAPS = { actuationMax: 10, hapticMax: 5, rtMax: 5 };
   const ISSUE_URL = 'https://github.com/Sunya0804/logitech_omm/issues/new';
 
   const st = {
@@ -625,18 +627,18 @@
   }
 
   // 아날로그 버튼(작동점, 래피드 트리거, 클릭 햅틱). 허용 범위는 기기가 알려 주는 단계 수를 따르고
-  // (공식 OMM 기준 작동점 1~단계 수, 래피드 트리거 1~단계 수, 햅틱 0~단계 수), 그 값을 읽지 못하면 편집을 막는다.
+  // (공식 OMM 기준 작동점 1~단계 수, 래피드 트리거 1~단계 수, 햅틱 0~단계 수), 읽지 못하면 기본 범위를 쓴다.
   function renderAnalog(p) {
-    const caps = st.analogCaps;
-    const ro = !canEdit() || !caps;
+    const caps = st.analogCaps || DEFAULT_ANALOG_CAPS;
+    const ro = !canEdit();
     const L = st.layout;
     const slider = (label, value, min, max, disabled, onInput) => {
       const out = h('output', null, String(value));
       return h('div', { class: 'dpi-row' },
-        h('span', { class: 'analog-label' }, max ? `${label} (${min}~${max})` : label),
+        h('span', { class: 'analog-label' }, `${label} (${min}~${max})`),
         h('input', {
           // 저장된 값이 범위를 벗어나 있어도 그대로 보여 준다.
-          type: 'range', min: Math.min(min, value), max: Math.max(max || P.ANALOG_MAX, value), step: 1, value, disabled,
+          type: 'range', min: Math.min(min, value), max: Math.max(max, value), step: 1, value, disabled,
           oninput: (e) => { out.textContent = e.target.value; onInput(Number(e.target.value)); touched(false); },
         }),
         out);
@@ -646,17 +648,18 @@
       const set = (patch) => P.setAnalog(p.raw, L, i, Object.assign(a, patch));
       return h('div', { class: 'analog' },
         h('h3', null, `아날로그 버튼 ${i + 1}`),
-        slider('작동점', a.actuation, 1, caps && caps.actuationMax, ro, (v) => set({ actuation: v })),
+        slider('작동점', a.actuation, 1, caps.actuationMax, ro, (v) => set({ actuation: v })),
         h('label', { class: 'analog-toggle' },
           h('input', { type: 'checkbox', checked: a.rtEnabled, disabled: ro, onchange: (e) => { set({ rtEnabled: e.target.checked }); touched(true); } }),
           ' 래피드 트리거 사용'),
-        slider('래피드 트리거 민감도', a.rtSensitivity, 1, caps && caps.rtMax, ro || !a.rtEnabled, (v) => set({ rtSensitivity: v })),
-        slider('클릭 햅틱 강도', a.haptic, 0, caps && caps.hapticMax, ro, (v) => set({ haptic: v })));
+        slider('래피드 트리거 민감도', a.rtSensitivity, 1, caps.rtMax, ro || !a.rtEnabled, (v) => set({ rtSensitivity: v })),
+        slider('클릭 햅틱 강도', a.haptic, 0, caps.hapticMax, ro, (v) => set({ haptic: v })));
     });
     return h('div', null,
-      !caps && h('div', { class: 'notice' }, '기기에서 아날로그 버튼의 허용 범위를 읽지 못해 값을 바꿀 수 없습니다. 현재 저장된 값만 표시합니다.'),
       sections,
-      h('p', { class: 'hint' }, '보통 버튼 1이 왼쪽, 버튼 2가 오른쪽입니다. 범위는 기기가 알려 준 단계 수입니다.'));
+      h('p', { class: 'hint' }, '일반적으로 버튼 1이 좌클릭, 버튼 2가 우클릭입니다. ' + (st.analogCaps
+        ? '범위는 기기가 알려 준 단계 수입니다.'
+        : '기기에서 범위를 읽지 못해 기본 범위(PRO X2 SUPERSTRIKE 기준)를 적용했습니다.')));
   }
 
   function renderInfo(p) {
