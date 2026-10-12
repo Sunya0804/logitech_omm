@@ -128,9 +128,26 @@ ul.hint { padding-left: 18px; }
 .dpi-row input[type="number"] { width: 92px; }
 .dpi-row label { white-space: nowrap; }
 .dpi-row + button { margin-top: 10px; }
-.analog-label { width: 150px; color: var(--muted); }
-.analog-toggle { display: block; padding: 6px 0; }
-.analog output { width: 32px; text-align: right; }
+.hits-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.hits-card { padding: 18px 20px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+.hits-card h3 { margin: 0 0 6px; font-size: 16px; color: var(--text); }
+.hits-card h3 span { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); font-size: 12px; font-weight: 400; }
+.hits-setting, .hits-toggle { padding: 14px 0; border-top: 1px solid var(--border); }
+.hits-card h3 + .hits-setting { border-top: 0; }
+.hits-head, .hits-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hits-title { font-weight: 600; }
+.hits-desc { color: var(--muted); font-size: 12px; }
+.hits-head output { min-width: 40px; padding: 2px 10px; border-radius: 6px; background: var(--panel-2); color: var(--accent); font-size: 18px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.hits-setting input[type="range"] { display: block; width: 100%; margin: 12px 0 2px; }
+.hits-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.hits-setting.disabled .hits-title, .hits-setting.disabled output { color: var(--muted); }
+.hits-toggle { cursor: pointer; }
+.switch { appearance: none; flex: none; width: 40px; height: 22px; margin: 0; border-radius: 999px; background: var(--border); position: relative; cursor: pointer; transition: background .15s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(18px); }
+.switch:disabled { opacity: .45; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
 
 .segmented { display: inline-flex; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .segmented button { border: 0; border-radius: 0; background: none; color: var(--muted); }

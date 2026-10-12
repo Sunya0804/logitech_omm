@@ -8,7 +8,8 @@
   // 실기기로 읽어 본 프로필 형식: 4는 PRO X Wireless, 5는 G502 X PLUS, 7은 PRO X 2 DEX. 1~3은 같은 구조다.
   // 나머지(6, 8, 10)는 공식 OMM의 구조 정보만 따른 것이라 사용자가 동의해야 편집을 연다.
   const DEVICE_VERIFIED_FORMATS = [1, 2, 3, 4, 5, 7];
-  const LAYOUT_NAMES = { classic: '기본 구조', classicDpiY: '기본 구조 + 세로 DPI', extended: '확장 구조', analog: '확장 구조 + 아날로그 버튼' };
+  const LAYOUT_NAMES = { classic: '기본 구조', classicDpiY: '기본 구조 + 세로 DPI', extended: '확장 구조', analog: '확장 구조 + HITS' };
+  const ANALOG_BUTTON_NAMES = ['좌클릭', '우클릭'];
   const CLASSIC_REPORT_RATES = [[1, '1000 Hz'], [2, '500 Hz'], [4, '250 Hz'], [8, '125 Hz']]; // 값 = 보고 간격(ms)
   const EXTENDED_RATE_INDEXES = [0, 1, 2, 3, 4, 5, 6]; // 값 = 인덱스, 125 << i Hz
   const DEFAULT_DPI_RANGE = { min: 100, max: 25600, step: 50 };
@@ -447,7 +448,7 @@
     }
 
     const hasAnalog = layoutKnown() && st.layout.analog !== null;
-    const tabs = [['dpi', '감도 (DPI)'], ['buttons', '버튼 할당'], hasAnalog && ['analog', '아날로그 버튼'], ['info', '기기 정보']].filter(Boolean);
+    const tabs = [['dpi', '감도 (DPI)'], ['buttons', '버튼 할당'], hasAnalog && ['analog', 'HITS 구성'], ['info', '기기 정보']].filter(Boolean);
     if (st.tab === 'analog' && !hasAnalog) st.tab = 'dpi';
     const body = st.tab === 'info' ? renderInfo(p)
       : !p.raw ? h('p', { class: 'empty' }, '이 프로필은 기기에서 읽을 수 없습니다.')
@@ -632,31 +633,37 @@
     const caps = st.analogCaps || DEFAULT_ANALOG_CAPS;
     const ro = !canEdit();
     const L = st.layout;
-    const slider = (label, value, min, max, disabled, onInput) => {
+    // 설정 한 줄: 이름과 설명, 현재 값, 그 아래 슬라이더와 양 끝 눈금.
+    const setting = (title, desc, value, min, max, disabled, onInput) => {
       const out = h('output', null, String(value));
-      return h('div', { class: 'dpi-row' },
-        h('span', { class: 'analog-label' }, `${label} (${min}~${max})`),
+      // 저장된 값이 범위를 벗어나 있어도 그대로 보여 준다.
+      const lo = Math.min(min, value);
+      const hi = Math.max(max, value);
+      return h('div', { class: 'hits-setting' + (disabled ? ' disabled' : '') },
+        h('div', { class: 'hits-head' },
+          h('div', null, h('div', { class: 'hits-title' }, title), h('div', { class: 'hits-desc' }, desc)),
+          out),
         h('input', {
-          // 저장된 값이 범위를 벗어나 있어도 그대로 보여 준다.
-          type: 'range', min: Math.min(min, value), max: Math.max(max, value), step: 1, value, disabled,
+          type: 'range', min: lo, max: hi, step: 1, value, disabled, 'aria-label': title,
           oninput: (e) => { out.textContent = e.target.value; onInput(Number(e.target.value)); touched(false); },
         }),
-        out);
+        h('div', { class: 'hits-scale' }, h('span', null, String(lo)), h('span', null, String(hi))));
     };
-    const sections = [...Array(L.analog.count).keys()].map((i) => {
+    const cards = [...Array(L.analog.count).keys()].map((i) => {
       const a = P.getAnalog(p.raw, L, i);
       const set = (patch) => P.setAnalog(p.raw, L, i, Object.assign(a, patch));
-      return h('div', { class: 'analog' },
-        h('h3', null, `아날로그 버튼 ${i + 1}`),
-        slider('작동점', a.actuation, 1, caps.actuationMax, ro, (v) => set({ actuation: v })),
-        h('label', { class: 'analog-toggle' },
-          h('input', { type: 'checkbox', checked: a.rtEnabled, disabled: ro, onchange: (e) => { set({ rtEnabled: e.target.checked }); touched(true); } }),
-          ' 래피드 트리거 사용'),
-        slider('래피드 트리거 민감도', a.rtSensitivity, 1, caps.rtMax, ro || !a.rtEnabled, (v) => set({ rtSensitivity: v })),
-        slider('클릭 햅틱 강도', a.haptic, 0, caps.hapticMax, ro, (v) => set({ haptic: v })));
+      return h('section', { class: 'hits-card' },
+        h('h3', null, `버튼 ${i + 1}`, ANALOG_BUTTON_NAMES[i] && h('span', null, ANALOG_BUTTON_NAMES[i])),
+        setting('작동점', '클릭이 입력되는 깊이', a.actuation, 1, caps.actuationMax, ro, (v) => set({ actuation: v })),
+        h('label', { class: 'hits-toggle' },
+          h('div', null, h('div', { class: 'hits-title' }, '래피드 트리거'), h('div', { class: 'hits-desc' }, '버튼을 떼기 시작하면 바로 입력 해제')),
+          h('input', { type: 'checkbox', class: 'switch', checked: a.rtEnabled, disabled: ro, onchange: (e) => { set({ rtEnabled: e.target.checked }); touched(true); } })),
+        setting('래피드 트리거 민감도', a.rtEnabled ? '입력 해제·재입력에 필요한 이동 거리' : '래피드 트리거를 켜면 조절할 수 있습니다',
+          a.rtSensitivity, 1, caps.rtMax, ro || !a.rtEnabled, (v) => set({ rtSensitivity: v })),
+        setting('클릭 햅틱 강도', '클릭할 때의 진동 세기 (0은 끔)', a.haptic, 0, caps.hapticMax, ro, (v) => set({ haptic: v })));
     });
     return h('div', null,
-      sections,
+      h('div', { class: 'hits-grid' }, cards),
       h('p', { class: 'hint' }, '일반적으로 버튼 1이 좌클릭, 버튼 2가 우클릭입니다. ' + (st.analogCaps
         ? '범위는 기기가 알려 준 단계 수입니다.'
         : '기기에서 범위를 읽지 못해 기본 범위(PRO X2 SUPERSTRIKE 기준)를 적용했습니다.')));
