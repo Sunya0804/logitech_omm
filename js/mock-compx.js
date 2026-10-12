@@ -20,6 +20,11 @@
     C.setScalar(img, F.angleSnap, 0);
     C.setScalar(img, F.ripple, 0);
     C.setScalar(img, F.performanceTime, 30);
+    [[255, 0, 0], [0, 0, 255], [0, 255, 0], [255, 255, 0], [0, 255, 255], [255, 0, 255], [255, 255, 255], [255, 128, 0]].forEach((c, i) => C.setDpiColor(img, i, c));
+    C.setScalar(img, F.dpiLightMode, 1);
+    C.setScalar(img, F.dpiLightBrightness, 128);
+    C.setScalar(img, F.dpiLightSpeed, 3);
+    C.setScalar(img, F.dpiLightState, 1);
     return img;
   }
 
@@ -30,11 +35,15 @@
       this.productName = 'VGN Demo Mouse';
       this.collections = [{ usagePage: 0xff02, usage: 2, inputReports: [{ reportId: 8 }], outputReports: [{ reportId: 8 }], featureReports: [] }];
       this.opened = false;
-      this.flash = defaultImage();
+      // 프로필마다 설정 이미지가 따로 있다. 구분되도록 프로필별 첫 단계 DPI를 다르게 둔다.
+      this.banks = [0, 1, 2, 3].map((i) => { const img = defaultImage(); C.setDpi(img, 0, 800 + 100 * i); return img; });
+      this.profile = 0;
       this.online = false;
       this.listeners = new Set();
       this.writes = []; // 기록된 [주소, 바이트들]
     }
+
+    get flash() { return this.banks[this.profile]; }
 
     async open() { this.opened = true; }
     async close() { this.opened = false; }
@@ -64,7 +73,11 @@
           this.flash.set(p.subarray(5, 5 + p[4]), address);
           this.writes.push([address, Array.from(p.subarray(5, 5 + p[4]))]);
           break;
-        case 0x0e: r[5] = 0; break;
+        case 0x0e: r[5] = this.profile; break;
+        case 0x0f:
+          if (p[4] !== 1 || p[5] > 3) { r[1] = 1; break; }
+          this.profile = p[5];
+          break;
         case 0x12: r.set([3, 0x03], 5); break;
         case 0x1d: r.set([2, 0x03], 5); break;
         default: r[1] = 1;

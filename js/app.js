@@ -503,10 +503,11 @@
     renderDeviceBar();
     renderHome();
     if (!connected) return;
-    // 프로필 목록과 백업·진단은 Logitech 온보드 프로필 전용이다.
-    $('#sidebar').hidden = !!compx();
+    // 백업·진단은 Logitech 온보드 프로필 전용이다.
+    $('#sidebar').hidden = false;
     for (const id of ['#btn-diagnostics', '#btn-export', '#btn-import']) $(id).hidden = !!compx();
     if (compx()) {
+      $('#sidebar').hidden = !compx().renderProfiles($('#sidebar'));
       compx().render($('#editor'));
       renderActionBar();
       return;

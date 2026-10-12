@@ -37,6 +37,40 @@
 
   const ownsDevice = (device) => !!cx.dev && cx.dev.devices.includes(device);
 
+  // 프로필마다 설정 이미지가 따로 있으므로, 바꾼 뒤 이미지를 다시 읽는다.
+  async function switchProfile(index) {
+    if (index === cx.extras.profile) return;
+    if (isDirty()) {
+      const ok = await ask('프로필 전환', ['저장하지 않은 변경 사항이 있습니다. 프로필을 바꾸면 이 변경 사항은 사라집니다.'], '버리고 전환');
+      if (!ok) return;
+    }
+    const done = await busy('프로필 전환 중…', () => cx.dev.withControl(async () => {
+      await cx.dev.setProfile(index);
+      const image = await cx.dev.readFlash(0, C.IMAGE_LENGTH);
+      const extras = await cx.dev.readExtras();
+      Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: C.parse(image).stageCount });
+    }));
+    if (done) toast(`프로필 ${cx.extras.profile + 1}(으)로 전환했습니다.`, 'ok');
+    OMM.ui.refresh();
+  }
+
+  // 프로필 카드 줄. 프로필 전환을 지원하지 않는 기기에서는 false를 돌려주고 아무것도 그리지 않는다.
+  function renderProfiles(root) {
+    if (cx.extras.profile === null) {
+      root.replaceChildren();
+      return false;
+    }
+    root.replaceChildren(...[...Array(C.PROFILE_COUNT).keys()].map((i) => h('div', {
+      class: 'profile' + (i === cx.extras.profile ? ' selected' : ''), role: 'button', tabindex: 0,
+      onclick: () => switchProfile(i),
+      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchProfile(i); } },
+    },
+      h('div', { class: 'profile-main' },
+        h('span', { class: 'profile-name' }, `프로필 ${i + 1}`),
+        h('span', { class: 'profile-sub' }, i === cx.extras.profile ? '사용 중' : '눌러서 전환')))));
+    return true;
+  }
+
   // 홈 카드와 상태 줄에 쓰는 요약 (기기에 저장된 값 기준)
   function summary() {
     const m = C.parse(cx.orig);
@@ -161,6 +195,35 @@
         }))));
   }
 
+  const toHexColor = ([r, g, b]) => '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+  const fromHexColor = (hex) => [1, 3, 5].map((i) => parseInt(hex.substr(i, 2), 16));
+
+  // DPI 표시등: DPI 단계를 바꿀 때 켜지는 작은 등의 동작과 단계별 색
+  function renderLighting(m) {
+    if (!m.hasDpiLight) return h('p', { class: 'empty' }, '이 기기에서는 표시등 설정을 읽을 수 없습니다.');
+    const light = m.dpiLight;
+    const levels = [...Array(C.BRIGHTNESS.length).keys()].map((i) => [i + 1, String(i + 1)]);
+    const speeds = [...Array(C.DPI_LIGHT_SPEED_MAX).keys()].map((i) => [i + 1, String(i + 1)]);
+    const off = light.kind === 'off';
+    return h('div', null,
+      field('DPI 표시등', null, choice('DPI 표시등', C.DPI_LIGHT, light.kind, false, (kind) => { C.setDpiLightKind(cx.work, kind); edited(); })),
+      h('p', { class: 'hint field-desc' }, 'DPI 단계를 알려 주는 표시등입니다. 끄면 배터리를 조금 아낄 수 있습니다.'),
+      field('밝기', null, choice('밝기', light.brightness ? levels : [[0, '기타'], ...levels], light.brightness, off,
+        (level) => scalar(C.FLASH.dpiLightBrightness)(C.BRIGHTNESS[level - 1]))),
+      field('숨쉬기 속도', null, choice('숨쉬기 속도', withCurrent(speeds, light.speed), light.speed, light.kind !== 'breathing', scalar(C.FLASH.dpiLightSpeed))),
+      h('h3', null, '단계별 색'),
+      h('div', { class: 'color-list' }, m.stages.slice(0, m.stageCount).map((dpi, i) => {
+        const color = m.dpiColors[i];
+        return h('label', { class: 'color-item' },
+          h('input', {
+            type: 'color', value: color ? toHexColor(color) : '#000000', disabled: !color, 'aria-label': `${i + 1}단계 색`,
+            onchange: (e) => { C.setDpiColor(cx.work, i, fromHexColor(e.target.value)); edited(); },
+          }),
+          h('span', null, h('b', null, `${i + 1}단계`), h('small', null, `${dpi.toLocaleString()} DPI`)));
+      })),
+      h('p', { class: 'hint' }, '본체 조명(RGB)이 있는 기종의 조명 효과는 아직 지원하지 않습니다.'));
+  }
+
   function renderAdvanced(m) {
     // 절전 시간은 두 주소(절전, 성능 모드 시간)에 같은 값으로 저장된다.
     const setSleep = (v) => { C.setScalar(cx.work, C.FLASH.sleep, v); C.setScalar(cx.work, C.FLASH.performanceTime, v); edited(); };
@@ -180,9 +243,9 @@
 
   function render(root) {
     const m = C.parse(cx.work);
-    const tabs = [['overview', '개요'], ['performance', '성능'], ['buttons', '버튼'], ['advanced', '고급']];
+    const tabs = [['overview', '개요'], ['performance', '성능'], ['buttons', '버튼'], ['lighting', '조명'], ['advanced', '고급']];
     const body = cx.tab === 'performance' ? renderPerformance(m) : cx.tab === 'buttons' ? renderButtons(m)
-      : cx.tab === 'advanced' ? renderAdvanced(m) : renderOverview(m);
+      : cx.tab === 'lighting' ? renderLighting(m) : cx.tab === 'advanced' ? renderAdvanced(m) : renderOverview(m);
     root.replaceChildren(
       h('div', { class: 'editor-head' }, h('h2', null, cx.dev.name)),
       h('nav', { class: 'tabs' }, tabs.map(([id, label]) => h('button', {
@@ -191,5 +254,5 @@
       h('div', { class: 'panel' }, body));
   }
 
-  OMM.compxUi = { connected, isDirty, connect, disconnect, ownsDevice, summary, save, revert, render, state: cx };
+  OMM.compxUi = { connected, isDirty, connect, disconnect, ownsDevice, summary, save, revert, render, renderProfiles, state: cx };
 })(window.OMM);

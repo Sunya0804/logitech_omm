@@ -1,6 +1,6 @@
 // VGN 계열(제조사 ID 0x3554) 마우스가 쓰는 16바이트 설정 프로토콜.
 // 설정은 기기의 플래시 메모리에 주소별로 저장되고, HID 리포트 8번으로 읽고 쓴다.
-// 명령 번호와 주소는 OpenMouse(mouse-protocol)가 정리한 내용을 참고했다. 코드는 가져오지 않았다.
+// 명령 번호와 주소는 OpenMouse(mouse-protocol)가 정리한 내용과 VGN 웹 허브의 동작을 참고했다. 코드는 가져오지 않았다.
 (function (OMM) {
   'use strict';
 
@@ -12,13 +12,15 @@
 
   const CMD = {
     IDENTIFY: 0x01, ONLINE: 0x03, BATTERY: 0x04, WRITE_FLASH: 0x07, READ_FLASH: 0x08,
-    GET_PROFILE: 0x0e, VERSION: 0x12, DONGLE_VERSION: 0x1d,
+    GET_PROFILE: 0x0e, SET_PROFILE: 0x0f, VERSION: 0x12, DONGLE_VERSION: 0x1d,
   };
 
   // 플래시 주소. 한 바이트짜리 값은 바로 뒤에 검사 바이트(0x55 - 값)가 붙는다.
   const FLASH = {
     reportRate: 0, stageCount: 2, currentStage: 4, lod: 10,
     dpi: 12, // 단계당 4바이트 × 8
+    dpiColor: 44, // 단계별 표시등 색 [R, G, B, 검사] × 8
+    dpiLightMode: 76, dpiLightBrightness: 78, dpiLightSpeed: 80, dpiLightState: 82,
     keys: 96, // 버튼당 4바이트 × 6
     debounce: 169, motionSync: 171, sleep: 173, angleSnap: 175, ripple: 177, performanceTime: 183,
   };
@@ -35,6 +37,12 @@
   const LOD = [[3, '낮음'], [1, '중간'], [2, '높음']]; // 저장 값은 순서대로가 아니다
   const SLEEP = [[1, '10초'], [3, '30초'], [6, '1분'], [12, '2분'], [30, '5분'], [60, '10분'], [180, '30분']]; // 10초 단위
   const DEBOUNCE_MAX = 15;
+  const PROFILE_COUNT = 4;
+  // DPI 표시등: 상태(켬/끔)와 모드(1 상시, 2 숨쉬기)가 따로 저장된다. 화면에서는 하나로 합쳐 고른다.
+  const DPI_LIGHT = [['off', '끔'], ['steady', '상시 켜짐'], ['breathing', '숨쉬기']];
+  const DPI_LIGHT_SPEED_MAX = 5;
+  // 밝기 1~10단계가 저장되는 값 (간격이 일정하지 않다)
+  const BRIGHTNESS = [16, 30, 60, 90, 128, 150, 180, 210, 230, 255];
 
   // 버튼 동작: [종류, 값, 이름]. 종류 0 사용 안 함, 1 마우스 버튼, 2 DPI.
   const KEY_ACTIONS = [
@@ -50,11 +58,11 @@
   const decodeRate = (v) => (v >= 16 ? (v / 16) * 2000 : v ? 1000 / v : null);
   const encodeRate = (hz) => (hz <= 1000 ? 1000 / hz : (hz / 2000) * 16);
 
-  // DPI 기록 [값, 값(복사본), 플래그, 검사]. 검사가 맞지 않으면 null.
+  // DPI 기록 [가로 값, 세로 값, 플래그, 검사]. 검사가 맞지 않으면 null. 가로 값을 그 단계의 DPI로 본다.
   function decodeDpi(image, slot) {
     const o = FLASH.dpi + 4 * slot;
-    const [low, dup, flags, sum] = image.subarray(o, o + 4);
-    if (low !== dup || ((low + dup + flags + sum) & 0xff) !== 0x55) return null;
+    const [low, lowY, flags, sum] = image.subarray(o, o + 4);
+    if (((low + lowY + flags + sum) & 0xff) !== 0x55) return null;
     let dpi = ((((flags >> 2) & 0x03) << 8) + low + 1) * DPI_STEP;
     if (flags & 0x01) dpi *= 2; // 높은 DPI 영역 표시. 이 범위는 읽기만 하고 직접 쓰지는 않는다.
     if (flags & 0x02) dpi *= 2;
@@ -77,6 +85,37 @@
     const clamped = Math.min(DPI_MAX, Math.max(DPI_MIN, v));
     if (clamped > (DPI_HIGH_FROM + 30000) / 2) return Math.max(DPI_HIGH_FROM, Math.round(clamped / 100) * 100);
     return Math.min(30000, Math.round(clamped / DPI_STEP) * DPI_STEP);
+  }
+
+  // 단계별 표시등 색: [r, g, b] 또는 검사가 맞지 않으면 null
+  function decodeDpiColor(image, slot) {
+    const o = FLASH.dpiColor + 4 * slot;
+    const [r, g, b, sum] = image.subarray(o, o + 4);
+    return ((r + g + b + sum) & 0xff) === 0x55 ? [r, g, b] : null;
+  }
+
+  function setDpiColor(image, slot, [r, g, b]) {
+    image.set([r, g, b, check(r + g + b)], FLASH.dpiColor + 4 * slot);
+  }
+
+  function decodeDpiLight(image) {
+    const on = image[FLASH.dpiLightState] === 1;
+    const level = BRIGHTNESS.indexOf(image[FLASH.dpiLightBrightness]) + 1; // 0이면 목록에 없는 값
+    return {
+      kind: !on ? 'off' : image[FLASH.dpiLightMode] === 2 ? 'breathing' : 'steady',
+      brightness: level, speed: image[FLASH.dpiLightSpeed],
+    };
+  }
+
+  function setDpiLightKind(image, kind) {
+    setScalar(image, FLASH.dpiLightState, kind === 'off' ? 0 : 1);
+    if (kind !== 'off') setScalar(image, FLASH.dpiLightMode, kind === 'breathing' ? 2 : 1);
+  }
+
+  // 표시등 관련 값들의 검사 바이트가 모두 맞는지 (맞지 않으면 이 기기에는 그 기능이 없다고 본다)
+  function hasDpiLight(image) {
+    const scalars = [FLASH.dpiLightMode, FLASH.dpiLightBrightness, FLASH.dpiLightSpeed, FLASH.dpiLightState];
+    return scalars.every((a) => image[a + 1] === check(image[a])) && decodeDpiColor(image, 0) !== null;
   }
 
   function setScalar(image, address, value) {
@@ -112,6 +151,8 @@
       lod: image[FLASH.lod], debounce: image[FLASH.debounce], sleep: image[FLASH.sleep],
       motionSync: image[FLASH.motionSync] === 1, angleSnap: image[FLASH.angleSnap] === 1, ripple: image[FLASH.ripple] === 1,
       keys: BUTTON_NAMES.map((_, i) => decodeKey(image, i)),
+      hasDpiLight: hasDpiLight(image), dpiLight: decodeDpiLight(image),
+      dpiColors: stages.map((_, i) => decodeDpiColor(image, i)),
     };
   }
 
@@ -249,6 +290,11 @@
       }
     }
 
+    // 프로필(0부터)을 바꾼다. 바꾼 뒤에는 설정 이미지를 다시 읽어야 한다.
+    setProfile(index) {
+      return this.accepted(CMD.SET_PROFILE, (p) => p.set([1, index], 4), '프로필 전환');
+    }
+
     // 상태 조회. 지원하지 않는 항목은 null.
     async readExtras() {
       const optional = (command) => this.exchange(command).then((r) => (r[1] === 0 ? r : null), () => null);
@@ -267,9 +313,10 @@
 
   OMM.compx = {
     VENDOR_ID, FLASH, IMAGE_LENGTH, DPI_SLOTS, DPI_MIN, DPI_MAX, DPI_STEP, DEBOUNCE_MAX,
-    BUTTON_NAMES, RATES, LOD, SLEEP, KEY_ACTIONS,
+    BUTTON_NAMES, RATES, LOD, SLEEP, KEY_ACTIONS, PROFILE_COUNT, DPI_LIGHT, DPI_LIGHT_SPEED_MAX, BRIGHTNESS,
     filters: [{ vendorId: VENDOR_ID }],
     parse, decodeRate, encodeRate, decodeDpi, setDpi, snapDpi, setScalar, decodeKey, setKey, keyLabel, diffRuns, check,
+    decodeDpiColor, setDpiColor, setDpiLightKind,
     CompxDevice,
   };
 })((window.OMM = window.OMM || {}));
