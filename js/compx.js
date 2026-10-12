@@ -273,6 +273,7 @@
       }, '식별');
       const type = r[11];
       this.info = { cid: r[9], mid: r[10], type, dongleType: r[12], wired: type === 2 || type === 3, maxRate: MAX_RATE_BY_TYPE[type] || 1000 };
+      this.info.raw = Array.from(r, (b) => b.toString(16).padStart(2, '0')).join('');
       return this.info;
     }
 

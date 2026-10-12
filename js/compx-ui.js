@@ -4,7 +4,8 @@
   'use strict';
 
   const C = OMM.compx;
-  const { h, choice, toast, busy, ask } = OMM.ui;
+  const { h, choice, toast, busy, ask, download } = OMM.ui;
+  const DIAG_LENGTH = 256;
 
   // stageLimit: 연결했을 때 기기가 쓰고 있던 DPI 단계 수. 펌웨어가 몇 단계까지 받는지 알 수 없어 그보다 늘리지 않는다.
   // model: 기종별 선택지와 범위 (compx.js의 MODELS)
@@ -15,15 +16,58 @@
   const connected = () => !!cx.work;
   const isDirty = () => connected() && C.diffRuns(cx.orig, cx.work).length > 0;
 
+  const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
+  // 새 기종 지원을 위한 읽기 전용 정보: USB 식별값과 인터페이스, 그리고 가능하면 기기 식별값과 설정 메모리.
+  async function collectDiagnostics(devices, dev) {
+    const first = devices[0];
+    const diag = {
+      type: 'omm-web-compx-diagnostics', version: 1, exportedAt: new Date().toISOString(),
+      vendorId: first.vendorId.toString(16).padStart(4, '0'), productId: first.productId.toString(16).padStart(4, '0'),
+      productName: first.productName,
+      interfaces: devices.map((d) => d.collections.map((c) => ({
+        usagePage: c.usagePage.toString(16), usage: c.usage.toString(16),
+        input: c.inputReports.map((r) => r.reportId), output: c.outputReports.map((r) => r.reportId), feature: c.featureReports.map((r) => r.reportId),
+      }))),
+    };
+    if (!dev.dev) return diag;
+    try {
+      diag.identity = dev.info || await dev.identify();
+      await dev.withControl(async () => {
+        diag.flash = toHex(await dev.readFlash(0, DIAG_LENGTH));
+        diag.extras = await dev.readExtras();
+      });
+    } catch (e) {
+      diag.error = e.message;
+    }
+    return diag;
+  }
+
+  // 지원하지 않는 기기를 고른 경우: 진단 파일을 저장할지 묻고, 연결은 하지 않는다.
+  async function offerDiagnostics(devices, dev, reason) {
+    const ok = await ask('지원하지 않는 기종', [
+      reason,
+      '이 기종을 지원 목록에 추가하는 데 필요한 진단 정보를 파일로 저장할 수 있습니다. 기기에서 값을 읽기만 하고 아무것도 쓰지 않습니다.',
+    ], '진단 파일 저장');
+    if (ok) download(await collectDiagnostics(devices, dev), 'diagnostics', devices[0].productName || 'device');
+    throw new Error(reason);
+  }
+
+  async function exportDiagnostics() {
+    let diag;
+    const done = await busy('진단 정보 읽는 중…', async () => { diag = await collectDiagnostics(cx.dev.devices, cx.dev); });
+    if (done) download(diag, 'diagnostics', deviceName());
+  }
+
   async function connect(devices) {
     const dev = new C.CompxDevice(devices);
-    if (!dev.dev) throw new Error('선택한 기기에서 설정용 인터페이스(리포트 8)를 찾지 못했습니다.');
+    if (!dev.dev) await offerDiagnostics(devices, dev, `${devices[0].productName || '이 기기'}: 설정용 인터페이스(리포트 8)가 없는 기종이라 아직 지원하지 않습니다.`);
     cx.dev = dev;
     await dev.open();
     cx.info = await dev.identify();
     cx.model = C.modelFor(dev.vendorId, cx.info.cid, cx.info.mid);
     if (!cx.model) {
-      throw new Error(`${dev.name}: 아직 지원하지 않는 기종입니다 (식별값 ${cx.info.cid},${cx.info.mid}). 기종에 따라 DPI 저장 방식이 달라서 확인된 기종만 연결합니다.`);
+      await offerDiagnostics(devices, dev, `${dev.name}: 아직 지원하지 않는 기종입니다 (식별값 ${cx.info.cid},${cx.info.mid}). 기종에 따라 DPI 저장 방식이 달라서 확인된 기종만 연결합니다.`);
     }
     const { image, extras } = await dev.withControl(async () => ({
       image: await dev.readFlash(0, C.IMAGE_LENGTH),
@@ -263,5 +307,7 @@
       h('div', { class: 'panel' }, body));
   }
 
-  OMM.compxUi = { connected, isDirty, connect, disconnect, ownsDevice, summary, save, revert, render, renderProfiles, state: cx };
+  OMM.compxUi = {
+    connected, isDirty, connect, disconnect, ownsDevice, summary, save, revert, render, renderProfiles, exportDiagnostics, state: cx,
+  };
 })(window.OMM);

@@ -306,9 +306,9 @@
     download(backup, 'profiles');
   }
 
-  function download(data, suffix) {
+  function download(data, suffix, name = st.name) {
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    h('a', { href: url, download: `${st.name.replace(/[^\w-]+/g, '_')}-${suffix}.json` }).click();
+    h('a', { href: url, download: `${name.replace(/[^\w-]+/g, '_')}-${suffix}.json` }).click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
@@ -505,7 +505,7 @@
     if (!connected) return;
     // 백업·진단은 Logitech 온보드 프로필 전용이다.
     $('#sidebar').hidden = false;
-    for (const id of ['#btn-diagnostics', '#btn-export', '#btn-import']) $(id).hidden = !!compx();
+    for (const id of ['#btn-export', '#btn-import']) $(id).hidden = !!compx();
     if (compx()) {
       $('#sidebar').hidden = !compx().renderProfiles($('#sidebar'));
       compx().render($('#editor'));
@@ -888,7 +888,7 @@
     $('#btn-save').addEventListener('click', () => (compx() ? compx().save() : save()));
     $('#btn-revert').addEventListener('click', () => (compx() ? compx().revert() : revert()));
     $('#btn-export').addEventListener('click', exportBackup);
-    $('#btn-diagnostics').addEventListener('click', exportDiagnostics);
+    $('#btn-diagnostics').addEventListener('click', () => (compx() ? compx().exportDiagnostics() : exportDiagnostics()));
     $('#btn-import').addEventListener('click', () => $('#import-file').click());
     $('#import-file').addEventListener('change', (e) => {
       if (e.target.files[0]) importBackup(e.target.files[0]);
@@ -913,7 +913,7 @@
   // 개발용: 콘솔에서 js/mock.js의 가상 기기를 OMM.connect(new OMM.MockTransport())로 연결할 수 있다.
   OMM.h = h;
   OMM.setView = setView;
-  OMM.ui = { h, choice, toast, busy, ask, refresh: render, refreshActions: renderActionBar };
+  OMM.ui = { h, choice, toast, busy, ask, download, refresh: render, refreshActions: renderActionBar };
   OMM.connectCompx = connectCompx;
   OMM.state = st;
   OMM.connect = connect;
