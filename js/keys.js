@@ -41,8 +41,11 @@
   const SPECIALS = {
     0x01: '휠 왼쪽 틸트', 0x02: '휠 오른쪽 틸트', 0x03: 'DPI 올리기', 0x04: 'DPI 내리기', 0x05: 'DPI 순환',
     0x06: '기본 DPI', 0x07: 'DPI 시프트', 0x08: '다음 프로필', 0x09: '이전 프로필', 0x0a: '프로필 순환',
-    0x0b: 'G-Shift', 0x0c: '배터리 잔량 표시',
+    0x0b: 'G-Shift', 0x0c: '배터리 잔량 표시', 0x10: '스크롤 내리기', 0x11: '스크롤 올리기',
   };
+
+  // 표시만 하고 선택 목록에는 넣지 않는 기능 (추가 값이 필요하거나 일부 기기 전용)
+  const SPECIALS_DISPLAY_ONLY = { 0x00: '동작 없음', 0x0d: '지정 프로필로 전환', 0x0e: '성능 모드 전환', 0x0f: '호스트 전환 버튼' };
 
   const CONSUMER = {
     0xcd: '재생/일시정지', 0xb5: '다음 트랙', 0xb6: '이전 트랙', 0xb7: '정지',
@@ -67,7 +70,7 @@
       // 실기기에는 상위 바이트에 usage page(0x0C)를 넣은 형태(0x0CE2)도 저장돼 있다.
       case 'consumer':
         return CONSUMER[action.usage] || (action.usage >> 8 === 0x0c && CONSUMER[action.usage & 0xff]) || `미디어 ${hex(action.usage, 4)}`;
-      case 'special': return SPECIALS[action.code] || `특수 기능 ${hex(action.code)}`;
+      case 'special': return SPECIALS[action.code] || SPECIALS_DISPLAY_ONLY[action.code] || `특수 기능 ${hex(action.code)}`;
       case 'disabled': return '사용 안 함';
       case 'macro': return '매크로';
     }

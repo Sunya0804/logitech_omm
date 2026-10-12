@@ -16,6 +16,10 @@
       name: 'OMM Demo Mouse X', formatId: 7, buttonCount: 5,
       features: [0x0000, 0x0005, 0x8100, 0x2202, 0x1004, 0x8061],
     },
+    analog: {
+      name: 'OMM Demo Mouse S', formatId: 8, buttonCount: 5,
+      features: [0x0000, 0x0005, 0x8100, 0x2202, 0x1004, 0x8061],
+    },
   };
 
   // 확장 DPI 목록: 100~200(1), ~500(2), ~1000(5), ~2000(10), ~5000(20), ~10000(50), ~44000(100)
@@ -31,7 +35,7 @@
   function classicProfile(name, dpis, rate) {
     const L = P.LAYOUTS.classic;
     const s = new Uint8Array(SECTOR_SIZE).fill(0xff);
-    P.setReportRate(s, L, rate);
+    P.setReportRate(s, L, 0, rate);
     P.setDpi(s, L, dpis.map((x) => ({ x, y: x, lod: 0 })), 1, 0);
     P.setName(s, L, name);
     CLASSIC_BUTTONS.forEach((b, i) => {
@@ -42,13 +46,14 @@
   }
 
   // 실기기 덤프의 앞부분(설정·버튼)과 뒷부분(조명)을 그대로 쓰고 DPI만 바꾼다.
-  function extendedProfile(dpis) {
+  function extendedProfile(dpis, analog) {
     const L = P.LAYOUTS.extended;
     const s = new Uint8Array(SECTOR_SIZE).fill(0xff);
     s.set(P.fromHex('030300002003200302b004b0040240064006026009600902800c800c0200000000ff00ffffffffffffffffff3c002c01'
       + '8001000180010002800100048001000880010010'));
     s.set(P.fromHex('0300000000001f400000000300000000001f400000000300000000001f403200000300000000001f4032000003'), 208);
     P.setDpi(s, L, dpis.map((x) => ({ x, y: x, lod: 2 })), 0, 0);
+    if (analog) for (const i of [0, 1]) P.setAnalog(s, P.LAYOUTS.analog, i, { actuation: 6, rtEnabled: i === 0, rtSensitivity: 3, haptic: 4 });
     return P.finalize(s);
   }
 
@@ -62,7 +67,7 @@
       this.write_ = null;
       const profiles = variant === 'classic'
         ? [classicProfile('', [400, 800, 1600, 3200], 1), classicProfile('FPS', [800, 1600], 1), classicProfile('Office', [1200], 8)]
-        : [extendedProfile([1600]), extendedProfile([800, 1200, 1600, 2400, 3200]), extendedProfile([400])];
+        : [[1600], [800, 1200, 1600, 2400, 3200], [400]].map((dpis) => extendedProfile(dpis, variant === 'analog'));
       this.sectors = new Map([
         [0x0000, P.buildDirectory(SECTOR_SIZE, [true, true, false])],
         [0x0001, profiles[0]], [0x0002, profiles[1]], [0x0003, profiles[2]],

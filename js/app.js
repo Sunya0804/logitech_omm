@@ -5,8 +5,10 @@
   const K = OMM.keys;
   const $ = (sel) => document.querySelector(sel);
 
-  // 실기기 데이터로 확인한 (프로필 형식 → 레이아웃): 4는 PRO X Wireless, 5는 G502 X PLUS, 7은 PRO X 2 DEX
-  const VERIFIED_LAYOUTS = { 1: 'classic', 2: 'classic', 3: 'classic', 4: 'classic', 5: 'classic', 7: 'extended' };
+  // 실기기로 읽어 본 프로필 형식: 4는 PRO X Wireless, 5는 G502 X PLUS, 7은 PRO X 2 DEX. 1~3은 같은 구조다.
+  // 나머지(6, 8, 10)는 공식 OMM의 구조 정보만 따른 것이라 사용자가 동의해야 편집을 연다.
+  const DEVICE_VERIFIED_FORMATS = [1, 2, 3, 4, 5, 7];
+  const LAYOUT_NAMES = { classic: '기본 구조', classicDpiY: '기본 구조 + 세로 DPI', extended: '확장 구조', analog: '확장 구조 + 아날로그 버튼' };
   const CLASSIC_REPORT_RATES = [[1, '1000 Hz'], [2, '500 Hz'], [4, '250 Hz'], [8, '125 Hz']]; // 값 = 보고 간격(ms)
   const EXTENDED_RATE_INDEXES = [0, 1, 2, 3, 4, 5, 6]; // 값 = 인덱스, 125 << i Hz
   const DEFAULT_DPI_RANGE = { min: 100, max: 25600, step: 50 };
@@ -171,7 +173,7 @@
   const isDirty = (p) => !!p.raw && (!P.sameData(p.raw, p.orig) || p.enabled !== p.origEnabled);
   const needsSectorWrite = (p) => !!p.raw && (p.source !== 'user' || p.sector !== p.index + 1 || !P.sameData(p.raw, p.orig));
   const layoutKnown = () => !!st.layout;
-  const formatVerified = () => layoutKnown() && VERIFIED_LAYOUTS[st.desc.profileFormatId] === st.layout.id;
+  const formatVerified = () => layoutKnown() && DEVICE_VERIFIED_FORMATS.includes(st.desc.profileFormatId);
   const canEdit = () => st.crcTrusted && layoutKnown() && (formatVerified() || st.unlock);
 
   function profileTitle(p) {
@@ -301,12 +303,15 @@
           sectors[hex4(n)] = `error: ${e.message}`;
         }
       }
+      // 아날로그 버튼 기능(0x1B0C)이 있으면 값 범위가 담긴 첫 번째 조회 응답을 그대로 남긴다.
+      const analogIdx = await hidpp.getFeature(OMM.FEATURE.ANALOG_BUTTONS);
+      const analogCaps = analogIdx ? P.toHex(await hidpp.request(analogIdx, 0x0).catch(() => [])) : null;
       diag = {
         type: 'omm-web-diagnostics', version: 1, exportedAt: new Date().toISOString(),
         device: st.name, deviceIndex: hidpp.devIdx,
         features: (await hidpp.getFeatureList()).map((f) => `${f.index}:${hex4(f.id)}`),
         onboard: { ...desc, descriptionRaw: descRaw, mode: st.mode, currentProfile: hex4(await op.getCurrentProfile()) },
-        dpiRange: st.dpiRange, reportRateIndexes: st.rateIndexes,
+        dpiRange: st.dpiRange, reportRateIndexes: st.rateIndexes, analogCapabilities: analogCaps,
         detectedLayout: st.layout ? st.layout.id : null,
         sectors,
       };
@@ -432,17 +437,19 @@
     } else if (!formatVerified()) {
       notices.push(h('label', null,
         h('input', { type: 'checkbox', checked: st.unlock, onchange: (e) => { st.unlock = e.target.checked; render(); } }),
-        ` 이 기기의 프로필 형식(${st.desc.profileFormatId})은 검증되지 않았습니다. 값이 잘못 해석될 수 있음을 이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.`));
+        ` 이 기기의 프로필 형식(${st.desc.profileFormatId})은 실제 기기로 확인하지 못했습니다. 값이 잘못 해석될 수 있음을 이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.`));
     }
     if (st.mode !== OMM.MODE.ONBOARD) {
       notices.push('기기가 호스트 모드입니다. 온보드 프로필은 온보드 메모리 모드에서만 적용됩니다. G HUB가 실행 중이면 기기를 호스트 모드로 되돌리니 먼저 종료하세요.');
     }
 
-    const tabs = [['dpi', '감도 (DPI)'], ['buttons', '버튼 할당'], ['info', '기기 정보']];
+    const hasAnalog = layoutKnown() && st.layout.analog !== null;
+    const tabs = [['dpi', '감도 (DPI)'], ['buttons', '버튼 할당'], hasAnalog && ['analog', '아날로그 버튼'], ['info', '기기 정보']].filter(Boolean);
+    if (st.tab === 'analog' && !hasAnalog) st.tab = 'dpi';
     const body = st.tab === 'info' ? renderInfo(p)
       : !p.raw ? h('p', { class: 'empty' }, '이 프로필은 기기에서 읽을 수 없습니다.')
       : !layoutKnown() ? h('p', { class: 'empty' }, '알 수 없는 프로필 형식입니다.')
-      : st.tab === 'dpi' ? renderDpi(p) : renderButtons(p);
+      : st.tab === 'dpi' ? renderDpi(p) : st.tab === 'analog' ? renderAnalog(p) : renderButtons(p);
 
     root.replaceChildren(
       ...notices.map((n) => h('div', { class: 'notice' }, n)),
@@ -467,21 +474,19 @@
       : Math.min(max, Math.round((v - min) / step) * step + min);
   }
 
-  function reportRateField(p, m, ro) {
+  // 보고율 바이트마다 선택 상자를 하나씩 만든다 (확장 구조는 무선/유선이 따로 있다).
+  function reportRateFields(p, m, ro) {
     const L = st.layout;
-    const options = L.id === 'classic' ? [...CLASSIC_REPORT_RATES]
+    const base = L.rateUnit === 'ms' ? CLASSIC_REPORT_RATES
       : (st.rateIndexes || EXTENDED_RATE_INDEXES).map((i) => [i, `${125 << i} Hz`]).reverse();
-    const uniform = m.reportRates.every((r) => r === m.reportRates[0]);
-    const cur = uniform ? m.reportRates[0] : -1;
-    // 연결 방식별 보고율이 서로 다르게 저장돼 있으면 바꾸기 전까지 그대로 둔다.
-    if (!uniform) options.unshift([-1, `연결 방식별 설정 유지 (${m.reportRates.join(' / ')})`]);
-    else if (!options.some(([v]) => v === cur)) options.push([cur, `기타 (${cur})`]);
-    return h('div', { class: 'field' },
-      h('label', null, '보고율'),
-      h('select', {
-        disabled: ro,
-        onchange: (e) => { if (Number(e.target.value) >= 0) P.setReportRate(p.raw, L, Number(e.target.value)); touched(true); },
-      }, options.map(([v, label]) => h('option', { value: v, selected: v === cur }, label))));
+    return L.reportRate.map((r, index) => {
+      const cur = m.reportRates[index];
+      const options = base.some(([v]) => v === cur) ? base : [...base, [cur, `기타 (${cur})`]];
+      return h('div', { class: 'field' },
+        h('label', null, r.label ? `보고율 (${r.label})` : '보고율'),
+        h('select', { disabled: ro, onchange: (e) => { P.setReportRate(p.raw, L, index, Number(e.target.value)); touched(false); } },
+          options.map(([v, label]) => h('option', { value: v, selected: v === cur }, label))));
+    });
   }
 
   function renderDpi(p) {
@@ -530,7 +535,7 @@
           oninput: (e) => { P.setName(p.raw, L, e.target.value); touched(false); },
           onchange: () => renderEditor(),
         })),
-      reportRateField(p, m, ro),
+      reportRateFields(p, m, ro),
       h('h3', null, `DPI 단계 (${min}~${max})`),
       rows,
       h('button', {
@@ -538,15 +543,16 @@
         onclick: () => { stages.push({ ...stages[stages.length - 1] }); commit(true); },
       }, '+ 단계 추가'),
       h('p', { class: 'hint' }, '시프트: 「DPI 시프트」 버튼을 누르고 있는 동안 적용되는 단계입니다.'),
-      L.id === 'extended' && h('p', { class: 'hint' }, '이 기기의 프로필 형식에서는 프로필 이름을 편집할 수 없습니다. 가로·세로 DPI는 같은 값으로 설정되며 리프트오프 거리는 기존 값을 유지합니다.'));
+      (L.dpiEntrySize === 5 || L.dpiY !== null) && h('p', { class: 'hint' }, '가로·세로 DPI는 같은 값으로 설정됩니다. 리프트오프 거리는 기존 값을 유지합니다.'),
+      !L.reportRate.length && h('p', { class: 'hint' }, '이 프로필 형식의 보고율은 값의 표현이 확인되지 않아 편집하지 않습니다.'));
   }
 
   function renderButtons(p) {
     const ro = !canEdit();
-    const count = Math.min(st.desc.buttonCount, P.MAX_BUTTONS);
     const L = st.layout;
-    const hasGShift = st.desc.hasGShift && L.gshift !== null;
+    const hasGShift = st.desc.hasGShift;
     const layer = hasGShift ? st.layer : 'buttons';
+    const count = Math.min(st.desc.buttonCount, layer === 'gshift' ? L.maxGShift : L.maxButtons);
 
     const row = (i) => {
       const bytes = P.getBinding(p.raw, L, layer, i);
@@ -614,15 +620,45 @@
       h('table', { class: 'buttons' },
         h('thead', null, h('tr', null, ['버튼', '현재 동작', '종류', '설정'].map((t) => h('th', null, t)))),
         h('tbody', null, [...Array(count).keys()].map(row))),
-      h('p', { class: 'hint' }, '버튼 번호는 기기 내부 순서입니다. 보통 1=왼쪽, 2=오른쪽, 3=휠 클릭 순이며 나머지는 기기마다 다릅니다.'),
-      st.desc.hasGShift && !hasGShift && h('p', { class: 'hint' }, '이 기기의 프로필 형식에서는 G-Shift 할당을 편집할 수 없습니다. 기존 값은 그대로 유지됩니다.'));
+      h('p', { class: 'hint' }, '버튼 번호는 기기 내부 순서입니다. 보통 1=왼쪽, 2=오른쪽, 3=휠 클릭 순이며 나머지는 기기마다 다릅니다.'));
+  }
+
+  // 아날로그 버튼(작동점, 래피드 트리거, 클릭 햅틱). 값의 실제 허용 범위는 기기가 정하는데 아직 읽어 오지 못하므로
+  // 저장 가능한 최대치(6비트)까지만 제한한다. 공식 OMM 기준 최솟값은 작동점 1, 래피드 트리거 1, 햅틱 0.
+  function renderAnalog(p) {
+    const ro = !canEdit();
+    const L = st.layout;
+    const slider = (label, value, min, disabled, onInput) => {
+      const out = h('output', null, String(value));
+      return h('div', { class: 'dpi-row' },
+        h('span', { class: 'analog-label' }, label),
+        h('input', {
+          type: 'range', min, max: P.ANALOG_MAX, step: 1, value, disabled,
+          oninput: (e) => { out.textContent = e.target.value; onInput(Number(e.target.value)); touched(false); },
+        }),
+        out);
+    };
+    const sections = [...Array(L.analog.count).keys()].map((i) => {
+      const a = P.getAnalog(p.raw, L, i);
+      const set = (patch) => P.setAnalog(p.raw, L, i, Object.assign(a, patch));
+      return h('div', { class: 'analog' },
+        h('h3', null, `아날로그 버튼 ${i + 1}`),
+        slider('작동점', a.actuation, 1, ro, (v) => set({ actuation: v })),
+        h('label', { class: 'analog-toggle' },
+          h('input', { type: 'checkbox', checked: a.rtEnabled, disabled: ro, onchange: (e) => { set({ rtEnabled: e.target.checked }); touched(true); } }),
+          ' 래피드 트리거 사용'),
+        slider('래피드 트리거 민감도', a.rtSensitivity, 1, ro || !a.rtEnabled, (v) => set({ rtSensitivity: v })),
+        slider('클릭 햅틱 강도', a.haptic, 0, ro, (v) => set({ haptic: v })));
+    });
+    return h('div', null, sections,
+      h('p', { class: 'hint' }, '보통 버튼 1이 왼쪽, 버튼 2가 오른쪽입니다. 숫자는 기기에 저장되는 단계 값이며, 기기가 허용하는 최댓값은 기종마다 다릅니다. 현재 값에서 조금씩 바꿔 보세요.'));
   }
 
   function renderInfo(p) {
     const d = st.desc;
     const rows = [
       ['기기', st.name],
-      ['프로필 형식', `${d.profileFormatId} · ${!layoutKnown() ? '알 수 없는 구조' : st.layout.id === 'classic' ? '기본 구조' : '확장 구조'}${formatVerified() ? '' : ' (미검증)'}`],
+      ['프로필 형식', `${d.profileFormatId} · ${!layoutKnown() ? '알 수 없는 구조' : LAYOUT_NAMES[st.layout.id]}${formatVerified() ? '' : ' (미검증)'}`],
       ['메모리 모델 / 매크로 형식', `${d.memoryModelId} / ${d.macroFormatId}`],
       ['프로필 수 (초기 활성)', `${d.profileCount} (${d.profileCountOob})`],
       ['버튼 수', d.buttonCount],

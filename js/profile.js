@@ -6,21 +6,44 @@
   const MAX_BUTTONS = 16;
   const NAME_CHARS = 24;
 
-  // 필드 오프셋. null인 필드는 위치가 확인되지 않아 읽지도 쓰지도 않는다.
+  // 프로필 형식별 필드 오프셋. 공식 Onboard Memory Manager 2.7의 구조 정보와 대조했고,
+  // classic은 PRO X Wireless(형식 4)·G502 X PLUS(형식 5), extended는 PRO X 2 DEX(형식 7) 실기기로도 확인했다.
+  // reportRate: 보고율 바이트들. rateUnit 'ms'는 보고 간격(1=1000Hz), 'index'는 125 << n Hz.
+  // null인 필드는 그 형식에 없거나 값의 표현을 알 수 없어 건드리지 않는다.
+  const WIRELESS_WIRED = [{ offset: 0, label: '무선' }, { offset: 1, label: '유선' }];
   const LAYOUTS = {
-    // 프로필 형식 1~5. libratbag(hidpp20.c)의 hidpp20_internal_profile 기준,
-    // PRO X Wireless(형식 4)와 G502 X PLUS(형식 5) 실기기로 확인.
+    // 형식 1~5
     classic: {
-      id: 'classic', reportRate: [0], defaultDpi: 1, shiftDpi: 2, dpi: 3, dpiEntrySize: 2,
-      buttons: 32, gshift: 96, name: 160, minSize: 210,
+      id: 'classic', reportRate: [{ offset: 0, label: '' }], rateUnit: 'ms',
+      defaultDpi: 1, shiftDpi: 2, dpi: 3, dpiEntrySize: 2, dpiY: null,
+      buttons: 32, gshift: 96, maxButtons: 16, maxGShift: 16, name: 160, analog: null, minSize: 210,
     },
-    // 프로필 형식 7. PRO X 2 DEX 실기기 데이터로 확인. 보고율이 2바이트(연결 방식별)이고
-    // DPI 단계가 [X(2), Y(2), LOD(1)] 5바이트로 늘어나 버튼 영역이 16바이트 뒤로 밀렸다.
+    // 형식 10 (펌웨어 업데이트 이후의 G502 X 계열): classic에 세로 DPI 표가 추가되어 버튼이 13개로 줄었다.
+    // 보고율은 연결 방식별 바이트(0x14, 0x15)가 따로 있는데 값의 표현을 알 수 없어 편집하지 않는다.
+    classicDpiY: {
+      id: 'classicDpiY', reportRate: [], rateUnit: null,
+      defaultDpi: 1, shiftDpi: 2, dpi: 3, dpiEntrySize: 2, dpiY: 0x56,
+      buttons: 32, gshift: 96, maxButtons: 13, maxGShift: 16, name: 160, analog: null, minSize: 210,
+    },
+    // 형식 6~7: 보고율이 무선/유선 2바이트, DPI 단계가 [X(2), Y(2), LOD(1)] 5바이트.
     extended: {
-      id: 'extended', reportRate: [0, 1], defaultDpi: 2, shiftDpi: 3, dpi: 4, dpiEntrySize: 5,
-      buttons: 48, gshift: null, name: null, minSize: 114,
+      id: 'extended', reportRate: WIRELESS_WIRED, rateUnit: 'index',
+      defaultDpi: 2, shiftDpi: 3, dpi: 4, dpiEntrySize: 5, dpiY: null,
+      buttons: 0x30, gshift: 0x70, maxButtons: 12, maxGShift: 12, name: 0xa0, analog: null, minSize: 210,
+    },
+    // 형식 8 (PRO X2 SUPERSTRIKE): extended에 아날로그 버튼 설정(버튼당 3바이트)이 추가됐다.
+    analog: {
+      id: 'analog', reportRate: WIRELESS_WIRED, rateUnit: 'index',
+      defaultDpi: 2, shiftDpi: 3, dpi: 4, dpiEntrySize: 5, dpiY: null,
+      buttons: 0x30, gshift: 0x70, maxButtons: 12, maxGShift: 12, name: 0xa0,
+      analog: { offset: 0x26, count: 2 }, minSize: 210,
     },
   };
+  const LAYOUT_BY_FORMAT = {
+    1: 'classic', 2: 'classic', 3: 'classic', 4: 'classic', 5: 'classic',
+    6: 'extended', 7: 'extended', 8: 'analog', 10: 'classicDpiY',
+  };
+  const ANALOG_MAX = 0x3f; // 값은 각 바이트의 상위 6비트에 저장된다
 
   // CRC-16/CCITT-FALSE (init 0xFFFF, poly 0x1021)
   function crc16(data, len) {
@@ -65,7 +88,7 @@
       const x = le16(raw, o);
       if (x === 0 || x === 0xffff) out.push(null);
       else if (L.dpiEntrySize === 5) out.push({ x, y: le16(raw, o + 2), lod: raw[o + 4] });
-      else out.push({ x, y: x, lod: 0 });
+      else out.push({ x, y: L.dpiY === null ? x : le16(raw, L.dpiY + 2 * i), lod: 0 });
     }
     return out;
   }
@@ -78,13 +101,14 @@
       name += String.fromCharCode(c);
     }
     return {
-      reportRates: L.reportRate.map((o) => raw[o]),
+      reportRates: L.reportRate.map((r) => raw[r.offset]),
       defaultDpi: raw[L.defaultDpi], shiftDpi: raw[L.shiftDpi], dpi: readDpi(raw, L), name,
     };
   }
 
-  function setReportRate(raw, L, value) {
-    for (const o of L.reportRate) raw[o] = value;
+  // index: L.reportRate 안에서의 순번
+  function setReportRate(raw, L, index, value) {
+    raw[L.reportRate[index].offset] = value;
   }
 
   // entries: 앞에서부터 채운 {x, y, lod} 목록. 남는 슬롯은 0으로 비운다.
@@ -95,6 +119,7 @@
       raw[o] = e.x & 0xff;
       raw[o + 1] = e.x >> 8;
       if (L.dpiEntrySize === 5) raw.set([e.y & 0xff, e.y >> 8, e.lod], o + 2);
+      if (L.dpiY !== null) raw.set([e.y & 0xff, e.y >> 8], L.dpiY + 2 * i);
     }
     raw[L.defaultDpi] = defaultIdx;
     raw[L.shiftDpi] = shiftIdx;
@@ -118,6 +143,18 @@
 
   function setBinding(raw, L, layer, i, bytes) {
     raw.set(bytes, L[layer] + 4 * i);
+  }
+
+  // 아날로그 버튼 i의 설정. 바이트 0: 작동점 << 2, 바이트 1: 래피드 트리거 민감도 << 2 | 사용(비트 0),
+  // 바이트 2: 클릭 햅틱 << 2.
+  function getAnalog(raw, L, i) {
+    const o = L.analog.offset + 3 * i;
+    return { actuation: raw[o] >> 2, rtEnabled: !!(raw[o + 1] & 1), rtSensitivity: raw[o + 1] >> 2, haptic: raw[o + 2] >> 2 };
+  }
+
+  function setAnalog(raw, L, i, a) {
+    const clamp = (v) => Math.min(ANALOG_MAX, Math.max(0, v | 0));
+    raw.set([clamp(a.actuation) << 2, (clamp(a.rtSensitivity) << 2) | (a.rtEnabled ? 1 : 0), clamp(a.haptic) << 2], L.analog.offset + 3 * i);
   }
 
   function decodeBinding(b) {
@@ -147,24 +184,24 @@
   function plausible(raw, L, buttonCount, dpiRange) {
     if (raw.length < L.minSize) return false;
     const m = parse(raw, L);
-    const rateOk = L === LAYOUTS.classic ? (r) => r >= 1 && r <= 8 : (r) => r <= 6;
+    const rateOk = L.rateUnit === 'ms' ? (r) => r >= 1 && r <= 8 : (r) => r <= 6;
     if (!m.reportRates.every(rateOk)) return false;
     const stages = m.dpi.filter(Boolean);
     const inRange = (v) => v >= dpiRange.min && v <= dpiRange.max;
     if (!stages.length || !stages.every((e) => inRange(e.x) && inRange(e.y) && e.lod <= 0x0f)) return false;
     if (m.defaultDpi >= DPI_SLOTS || m.shiftDpi >= DPI_SLOTS) return false;
-    for (let i = 0; i < Math.min(buttonCount, MAX_BUTTONS); i++) {
+    for (let i = 0; i < Math.min(buttonCount, L.maxButtons); i++) {
       if (decodeBinding(getBinding(raw, L, 'buttons', i)).kind === 'raw') return false;
     }
     return true;
   }
 
-  // 프로필 형식 번호로 예상되는 레이아웃을 고르되, 실제 데이터와 맞지 않으면 다른 쪽을 시도한다.
-  // 어느 쪽으로도 읽히지 않으면 null.
+  // 프로필 형식 번호에 해당하는 레이아웃을 고르고, 실제 데이터가 그 구조로 말이 되는지 확인한다.
+  // 모르는 형식 번호는 최신 구조부터 차례로 맞춰 본다. 어느 쪽으로도 읽히지 않으면 null.
   function detectLayout(raw, formatId, buttonCount, dpiRange) {
-    const expected = formatId >= 6 ? LAYOUTS.extended : LAYOUTS.classic;
-    const other = expected === LAYOUTS.classic ? LAYOUTS.extended : LAYOUTS.classic;
-    return [expected, other].find((L) => plausible(raw, L, buttonCount, dpiRange)) || null;
+    const known = LAYOUT_BY_FORMAT[formatId];
+    const candidates = known ? [LAYOUTS[known]] : [LAYOUTS.extended, LAYOUTS.classic];
+    return candidates.find((L) => plausible(raw, L, buttonCount, dpiRange)) || null;
   }
 
   // 섹터 0x0000: [섹터(2, BE), 활성(1), 예약(1)] 반복, 0xFFFF로 종료
@@ -195,9 +232,9 @@
   }
 
   OMM.profile = {
-    LAYOUTS, DPI_SLOTS, MAX_BUTTONS, NAME_CHARS,
+    LAYOUTS, LAYOUT_BY_FORMAT, DPI_SLOTS, NAME_CHARS, ANALOG_MAX,
     crc16, hasValidCrc, finalize, sameData, parse, detectLayout,
-    setReportRate, setDpi, setName, getBinding, setBinding, decodeBinding, encodeBinding,
+    setReportRate, setDpi, setName, getBinding, setBinding, getAnalog, setAnalog, decodeBinding, encodeBinding,
     parseDirectory, buildDirectory, toHex, fromHex,
   };
 })((window.OMM = window.OMM || {}));
