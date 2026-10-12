@@ -15,33 +15,40 @@
     // 형식 1~5
     classic: {
       id: 'classic', reportRate: [{ offset: 0, label: '' }], rateUnit: 'ms',
-      defaultDpi: 1, shiftDpi: 2, dpi: 3, dpiEntrySize: 2, dpiY: null,
+      defaultDpi: 1, shiftDpi: 2, dpi: 3, dpiEntrySize: 2, dpiY: null, lodEditable: false, bunnyHop: null,
       buttons: 32, gshift: 96, maxButtons: 16, maxGShift: 16, name: 160, analog: null, minSize: 210,
     },
     // 형식 10 (펌웨어 업데이트 이후의 G502 X 계열): classic에 세로 DPI 표가 추가되어 버튼이 13개로 줄었다.
     // 보고율은 연결 방식별 바이트(0x14, 0x15)가 따로 있는데 값의 표현을 알 수 없어 편집하지 않는다.
     classicDpiY: {
       id: 'classicDpiY', reportRate: [], rateUnit: null,
-      defaultDpi: 1, shiftDpi: 2, dpi: 3, dpiEntrySize: 2, dpiY: 0x56,
+      defaultDpi: 1, shiftDpi: 2, dpi: 3, dpiEntrySize: 2, dpiY: 0x56, lodEditable: false, bunnyHop: null,
       buttons: 32, gshift: 96, maxButtons: 13, maxGShift: 16, name: 160, analog: null, minSize: 210,
     },
-    // 형식 6~7: 보고율이 무선/유선 2바이트, DPI 단계가 [X(2), Y(2), LOD(1)] 5바이트.
+    // 형식 6: 보고율이 무선/유선 2바이트, DPI 단계가 [X(2), Y(2), LOD(1)] 5바이트.
+    // lodEditable: 리프트오프 거리 값(1 낮음, 2 중간, 3 높음)이 실기기 데이터로 확인된 형식인지 (형식 7, 8).
+    extendedBasic: {
+      id: 'extendedBasic', reportRate: WIRELESS_WIRED, rateUnit: 'index',
+      defaultDpi: 2, shiftDpi: 3, dpi: 4, dpiEntrySize: 5, dpiY: null, lodEditable: false, bunnyHop: null,
+      buttons: 0x30, gshift: 0x70, maxButtons: 12, maxGShift: 12, name: 0xa0, analog: null, minSize: 210,
+    },
+    // 형식 7: 형식 6에 버니합 방지 시간(0x25, 10ms 단위, 0은 끔)이 추가됐다.
     extended: {
       id: 'extended', reportRate: WIRELESS_WIRED, rateUnit: 'index',
-      defaultDpi: 2, shiftDpi: 3, dpi: 4, dpiEntrySize: 5, dpiY: null,
+      defaultDpi: 2, shiftDpi: 3, dpi: 4, dpiEntrySize: 5, dpiY: null, lodEditable: true, bunnyHop: 0x25,
       buttons: 0x30, gshift: 0x70, maxButtons: 12, maxGShift: 12, name: 0xa0, analog: null, minSize: 210,
     },
     // 형식 8 (PRO X2 SUPERSTRIKE): extended에 아날로그 버튼 설정(버튼당 3바이트)이 추가됐다.
     analog: {
       id: 'analog', reportRate: WIRELESS_WIRED, rateUnit: 'index',
-      defaultDpi: 2, shiftDpi: 3, dpi: 4, dpiEntrySize: 5, dpiY: null,
+      defaultDpi: 2, shiftDpi: 3, dpi: 4, dpiEntrySize: 5, dpiY: null, lodEditable: true, bunnyHop: 0x25,
       buttons: 0x30, gshift: 0x70, maxButtons: 12, maxGShift: 12, name: 0xa0,
       analog: { offset: 0x26, count: 2 }, minSize: 210,
     },
   };
   const LAYOUT_BY_FORMAT = {
     1: 'classic', 2: 'classic', 3: 'classic', 4: 'classic', 5: 'classic',
-    6: 'extended', 7: 'extended', 8: 'analog', 10: 'classicDpiY',
+    6: 'extendedBasic', 7: 'extended', 8: 'analog', 10: 'classicDpiY',
   };
   const ANALOG_MAX = 0x3f; // 값은 각 바이트의 상위 6비트에 저장된다
 
@@ -103,6 +110,7 @@
     return {
       reportRates: L.reportRate.map((r) => raw[r.offset]),
       defaultDpi: raw[L.defaultDpi], shiftDpi: raw[L.shiftDpi], dpi: readDpi(raw, L), name,
+      bunnyHop: L.bunnyHop ? raw[L.bunnyHop] : null,
     };
   }
 
@@ -123,6 +131,16 @@
     }
     raw[L.defaultDpi] = defaultIdx;
     raw[L.shiftDpi] = shiftIdx;
+  }
+
+  // value: 저장 바이트 (0 = 끔, 그 외 = 시간(ms) / 10)
+  function setBunnyHop(raw, L, value) {
+    raw[L.bunnyHop] = value;
+  }
+
+  // 아날로그 버튼 i의 저장 바이트 3개. 기기의 현재 값 설정 명령(0x1B0C)도 같은 표현을 쓴다.
+  function analogBytes(raw, L, i) {
+    return raw.slice(L.analog.offset + 3 * i, L.analog.offset + 3 * i + 3);
   }
 
   function setName(raw, L, name) {
@@ -200,7 +218,7 @@
   // 모르는 형식 번호는 최신 구조부터 차례로 맞춰 본다. 어느 쪽으로도 읽히지 않으면 null.
   function detectLayout(raw, formatId, buttonCount, dpiRange) {
     const known = LAYOUT_BY_FORMAT[formatId];
-    const candidates = known ? [LAYOUTS[known]] : [LAYOUTS.extended, LAYOUTS.classic];
+    const candidates = known ? [LAYOUTS[known]] : [LAYOUTS.extendedBasic, LAYOUTS.classic];
     return candidates.find((L) => plausible(raw, L, buttonCount, dpiRange)) || null;
   }
 
@@ -234,7 +252,7 @@
   OMM.profile = {
     LAYOUTS, LAYOUT_BY_FORMAT, DPI_SLOTS, NAME_CHARS, ANALOG_MAX,
     crc16, hasValidCrc, finalize, sameData, parse, detectLayout,
-    setReportRate, setDpi, setName, getBinding, setBinding, getAnalog, setAnalog, decodeBinding, encodeBinding,
+    setReportRate, setDpi, setName, setBunnyHop, analogBytes, getBinding, setBinding, getAnalog, setAnalog, decodeBinding, encodeBinding,
     parseDirectory, buildDirectory, toHex, fromHex,
   };
 })((window.OMM = window.OMM || {}));

@@ -65,6 +65,7 @@
       this.mode = OMM.MODE.ONBOARD;
       this.current = 0x0001;
       this.write_ = null;
+      this.analogLive = {}; // 0x1B0C로 설정된 버튼별 현재 값
       const profiles = variant === 'classic'
         ? [classicProfile('', [400, 800, 1600, 3200], 1), classicProfile('FPS', [800, 1600], 1), classicProfile('Office', [1200], 8)]
         : [[1600], [800, 1200, 1600, 2400, 3200], [400]].map((dpis) => extendedProfile(dpis, variant === 'analog'));
@@ -124,6 +125,11 @@
           break;
         case 0x1b0c:
           if (fn === 0) return [0x00, 0x03, 10 << 2, 5 << 2, 5 << 2, 0]; // 버튼 2개, 작동점 10 / 햅틱 5 / 래피드 트리거 5단계
+          if (fn === 1) {
+            this.analogLive[p[0]] = Array.from(p.subarray(1, 4));
+            return [p[0], p[1], p[2], p[3]];
+          }
+          if (fn === 2) return [p[0], ...(this.analogLive[p[0]] || [0, 0, 0])];
           break;
         case 0x8100:
           return this._onboard(fn, p);

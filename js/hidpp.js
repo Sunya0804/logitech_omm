@@ -250,6 +250,14 @@
       return sane ? caps : null;
     }
 
+    // 아날로그 버튼 하나의 현재 값을 바꾼다 (프로필에 저장되는 것과 같은 3바이트). 프로필에 쓴 값은
+    // 전원을 켤 때 불러오므로, 저장 직후 바로 적용하려면 이 명령도 보내야 한다.
+    async setAnalogLive(button, bytes) {
+      const idx = await this.getFeature(FEATURE.ANALOG_BUTTONS);
+      if (idx) await this.request(idx, 1, [button, ...bytes]);
+      return !!idx;
+    }
+
     // 확장 보고율(0x8061)이 지원하는 보고율 인덱스 목록 (인덱스 i = 125 << i Hz). 미지원이면 null.
     async getReportRateIndexes() {
       const idx = await this.getFeature(FEATURE.EXTENDED_REPORT_RATE);

@@ -121,6 +121,7 @@ ul.hint { padding-left: 18px; }
 .field { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .field > label { width: 90px; color: var(--muted); }
 .field input[type="text"] { width: 260px; }
+.field-desc { margin: -4px 0 14px 102px; max-width: 560px; }
 
 .dpi-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
 .dpi-idx { width: 48px; color: var(--muted); }

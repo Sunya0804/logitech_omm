@@ -6,9 +6,14 @@
   const $ = (sel) => document.querySelector(sel);
 
   // 실기기로 읽어 본 프로필 형식: 4는 PRO X Wireless, 5는 G502 X PLUS, 7은 PRO X 2 DEX. 1~3은 같은 구조다.
-  // 나머지(6, 8, 10)는 공식 OMM의 구조 정보만 따른 것이라 사용자가 동의해야 편집을 연다.
-  const DEVICE_VERIFIED_FORMATS = [1, 2, 3, 4, 5, 7];
-  const LAYOUT_NAMES = { classic: '기본 구조', classicDpiY: '기본 구조 + 세로 DPI', extended: '확장 구조', analog: '확장 구조 + HITS' };
+  // 8(SUPERSTRIKE)은 직접 읽어 보지는 못했지만 공개된 실기기 덤프와 구조가 일치한다.
+  // 나머지(6, 10)는 공식 OMM의 구조 정보만 따른 것이라 사용자가 동의해야 편집을 연다.
+  const DEVICE_VERIFIED_FORMATS = [1, 2, 3, 4, 5, 7, 8];
+  const LAYOUT_NAMES = {
+    classic: '기본 구조', classicDpiY: '기본 구조 + 세로 DPI', extendedBasic: '확장 구조', extended: '확장 구조', analog: '확장 구조 + HITS',
+  };
+  const LOD_LEVELS = [[1, '낮음'], [2, '중간'], [3, '높음']];
+  const BUNNY_HOP_MS = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
   const ANALOG_BUTTON_NAMES = ['좌클릭', '우클릭'];
   const CLASSIC_REPORT_RATES = [[1, '1000 Hz'], [2, '500 Hz'], [4, '250 Hz'], [8, '125 Hz']]; // 값 = 보고 간격(ms)
   const EXTENDED_RATE_INDEXES = [0, 1, 2, 3, 4, 5, 6]; // 값 = 인덱스, 125 << i Hz
@@ -198,6 +203,7 @@
     if (!ok) return;
 
     let reloadFailed = false;
+    let liveFailed = false;
     const done = await busy('저장 중…', async (setMsg) => {
       const { op } = st;
       const writeVerified = async (sector, data, label) => {
@@ -228,6 +234,16 @@
       try {
         await op.setCurrentProfile(active.index + 1);
         st.current = active.index + 1;
+        // HITS 값은 프로필을 다시 불러오는 것만으로 바로 바뀌는지 확인되지 않아, 현재 값으로도 직접 적용한다.
+        const L = st.layout;
+        if (L.analog && active.raw) {
+          try {
+            for (let i = 0; i < L.analog.count; i++) await st.hidpp.setAnalogLive(i, P.analogBytes(active.raw, L, i));
+          } catch (e) {
+            if (!(e instanceof OMM.HidppError)) throw e;
+            liveFailed = true;
+          }
+        }
       } catch (e) {
         // 기록과 검증은 이미 끝났으므로 저장 실패로 취급하지 않는다.
         if (!(e instanceof OMM.HidppError)) throw e;
@@ -235,6 +251,7 @@
       }
     });
     if (done && st.mode !== OMM.MODE.ONBOARD) toast('저장했습니다. 기기가 호스트 모드라서, 온보드 메모리 모드로 바꿔야 적용됩니다.', 'ok');
+    else if (done && liveFailed) toast('저장했습니다. HITS 값을 바로 적용하지는 못했으니, 마우스를 껐다 켜면 적용됩니다.', 'ok');
     else if (done && reloadFailed) toast('저장했습니다. 기기가 프로필 다시 불러오기를 거부했으니, 마우스를 껐다 켜면 적용됩니다.', 'ok');
     else if (done) toast('저장했습니다.', 'ok');
     render();
@@ -493,6 +510,21 @@
     });
   }
 
+  // 버니합(BHOP) 시간. 저장 값은 ms / 10이고 0은 끔. G HUB에서는 100~1000 ms 범위다.
+  function bunnyHopField(p, m, ro) {
+    const options = [[0, '끔'], ...BUNNY_HOP_MS.map((ms) => [ms / 10, `${ms} ms`])];
+    if (!options.some(([v]) => v === m.bunnyHop)) {
+      options.unshift([m.bunnyHop, m.bunnyHop === 0xff ? '설정 안 됨 (기기 기본값)' : `기타 (${m.bunnyHop * 10} ms)`]);
+    }
+    return [
+      h('div', { class: 'field' },
+        h('label', null, '버니합 (BHOP)'),
+        h('select', { disabled: ro, onchange: (e) => { P.setBunnyHop(p.raw, st.layout, Number(e.target.value)); touched(false); } },
+          options.map(([v, label]) => h('option', { value: v, selected: v === m.bunnyHop }, label)))),
+      h('p', { class: 'hint field-desc' }, '휠 스크롤에 점프를 할당해 쓰는 게임을 위한 휠 설정입니다. 의도하지 않은 휠 움직임 때문에 점프가 엉뚱한 타이밍에 입력되는 것을 줄여 줍니다. 휠로 점프하지 않는다면 「끔」으로 두면 됩니다.'),
+    ];
+  }
+
   function renderDpi(p) {
     const ro = !canEdit();
     const L = st.layout;
@@ -519,6 +551,11 @@
         number,
         h('label', null, h('input', { type: 'radio', name: 'dpi-def', checked: i === def, disabled: ro, onchange: () => { def = i; commit(false); } }), ' 기본'),
         h('label', null, h('input', { type: 'radio', name: 'dpi-shift', checked: i === shift, disabled: ro, onchange: () => { shift = i; commit(false); } }), ' 시프트'),
+        L.lodEditable && h('select', {
+          title: '리프트오프 거리', 'aria-label': '리프트오프 거리', disabled: ro,
+          onchange: (e) => { stages[i].lod = Number(e.target.value); commit(false); },
+        }, (LOD_LEVELS.some(([v]) => v === stage.lod) ? LOD_LEVELS : [...LOD_LEVELS, [stage.lod, `기타 (${stage.lod})`]])
+          .map(([v, label]) => h('option', { value: v, selected: v === stage.lod }, `LOD ${label}`))),
         h('button', {
           class: 'ghost', title: '단계 삭제', disabled: ro || stages.length <= 1,
           onclick: () => {
@@ -540,6 +577,7 @@
           onchange: () => renderEditor(),
         })),
       reportRateFields(p, m, ro),
+      m.bunnyHop !== null && bunnyHopField(p, m, ro),
       h('h3', null, `DPI 단계 (${min}~${max})`),
       rows,
       h('button', {
@@ -547,7 +585,9 @@
         onclick: () => { stages.push({ ...stages[stages.length - 1] }); commit(true); },
       }, '+ 단계 추가'),
       h('p', { class: 'hint' }, '시프트: 「DPI 시프트」 버튼을 누르고 있는 동안 적용되는 단계입니다.'),
-      (L.dpiEntrySize === 5 || L.dpiY !== null) && h('p', { class: 'hint' }, '가로·세로 DPI는 같은 값으로 설정됩니다. 리프트오프 거리는 기존 값을 유지합니다.'),
+      (L.dpiEntrySize === 5 || L.dpiY !== null) && h('p', { class: 'hint' }, '가로·세로 DPI는 같은 값으로 설정됩니다.'
+        + (L.lodEditable ? ' LOD는 마우스를 들어 올렸을 때 추적이 멈추는 높이(리프트오프 거리)입니다.'
+          : L.dpiEntrySize === 5 ? ' 리프트오프 거리는 이 프로필 형식에서 지원 단계가 확인되지 않아 기존 값을 유지합니다.' : '')),
       !L.reportRate.length && h('p', { class: 'hint' }, '이 프로필 형식의 보고율은 값의 표현이 확인되지 않아 편집하지 않습니다.'));
   }
 
