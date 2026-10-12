@@ -1,10 +1,12 @@
-// VGN 계열(제조사 ID 0x3554) 마우스가 쓰는 16바이트 설정 프로토콜.
+// VGN(제조사 ID 0x3554)과 ATK(0x373b) 마우스가 쓰는 16바이트 설정 프로토콜.
 // 설정은 기기의 플래시 메모리에 주소별로 저장되고, HID 리포트 8번으로 읽고 쓴다.
 // 명령 번호와 주소는 OpenMouse(mouse-protocol)가 정리한 내용과 VGN 웹 허브의 동작을 참고했다. 코드는 가져오지 않았다.
 (function (OMM) {
   'use strict';
 
-  const VENDOR_ID = 0x3554;
+  const VENDOR_VGN = 0x3554;
+  const VENDOR_ATK = 0x373b;
+  const VENDOR_IDS = [VENDOR_VGN, VENDOR_ATK];
   const REPORT_ID = 0x08;
   const PACKET_LENGTH = 16;
   const CHUNK = 10; // 한 패킷에 실리는 데이터 바이트 수
@@ -81,8 +83,32 @@
   }
 
   // 기기가 표현할 수 있는 값으로 맞춘다: 30,000까지 50 단위, 그 위로는 100 단위.
-  function snapDpi(v) {
-    const clamped = Math.min(DPI_MAX, Math.max(DPI_MIN, v));
+  // 기종별 차이. lod / sleep: [저장 값, 표시], debounce: 고를 수 있는 값(ms), maxRate: 기종 자체의 보고율 상한.
+  // lighting / profiles: DPI 표시등 설정과 프로필 전환을 화면에 낼지 (확인된 기종만 켠다).
+  const ATK_COMMON = {
+    brand: 'ATK', debounce: [0, 1, 2, 4, 8, 15, 20], lighting: false, profiles: false,
+    sleep: [[3, '30초'], [6, '1분'], [12, '2분'], [18, '3분'], [30, '5분'], [120, '20분'], [150, '25분'], [180, '30분']],
+  };
+  const MODELS = {
+    // 실기기(DragonFly F2 Ultra+)로 확인한 VGN 기본값
+    vgn: {
+      brand: 'VGN', model: null, dpiMin: DPI_MIN, dpiMax: DPI_MAX, lod: LOD, sleep: SLEEP, maxRate: 8000,
+      debounce: [...Array(DEBOUNCE_MAX + 1).keys()], lighting: true, profiles: true,
+    },
+    // ATK는 같은 프로토콜이라도 센서에 따라 DPI 표현이 달라서, 50 단위 표현을 쓰는 것으로 알려진 기종만 받는다.
+    // 값은 OpenMouse가 ATK HUB와 실기기로 대조해 둔 내용을 따랐다. 이 프로젝트에서 실기기로 확인한 적은 없다.
+    'atk:2,39': { ...ATK_COMMON, model: 'ATK X1 Pro Max', dpiMin: 50, dpiMax: 36000, maxRate: 8000, lod: [[3, '0.7 mm'], [1, '1 mm'], [2, '2 mm']] },
+    'atk:2,83': { ...ATK_COMMON, model: 'ATK A9 Plus Nearlink', dpiMin: 100, dpiMax: 30000, maxRate: 1000, lod: [[1, '1 mm'], [2, '2 mm']] },
+  };
+
+  // 식별 응답(cid, mid)에 맞는 기종 설정. 지원하지 않는 기종이면 null.
+  function modelFor(vendorId, cid, mid) {
+    if (vendorId === VENDOR_VGN) return MODELS.vgn;
+    return MODELS[`atk:${cid},${mid}`] || null;
+  }
+
+  function snapDpi(v, model = MODELS.vgn) {
+    const clamped = Math.min(model.dpiMax, Math.max(model.dpiMin, v));
     if (clamped > (DPI_HIGH_FROM + 30000) / 2) return Math.max(DPI_HIGH_FROM, Math.round(clamped / 100) * 100);
     return Math.min(30000, Math.round(clamped / DPI_STEP) * DPI_STEP);
   }
@@ -188,8 +214,12 @@
         && c.inputReports[0].reportId === REPORT_ID && c.outputReports[0].reportId === REPORT_ID);
     }
 
+    get vendorId() {
+      return this.dev.vendorId;
+    }
+
     get name() {
-      return (this.dev && this.dev.productName) || 'VGN 마우스';
+      return (this.dev && this.dev.productName) || '마우스';
     }
 
     async open() {
@@ -312,9 +342,9 @@
   }
 
   OMM.compx = {
-    VENDOR_ID, FLASH, IMAGE_LENGTH, DPI_SLOTS, DPI_MIN, DPI_MAX, DPI_STEP, DEBOUNCE_MAX,
+    VENDOR_IDS, VENDOR_VGN, VENDOR_ATK, MODELS, modelFor, FLASH, IMAGE_LENGTH, DPI_SLOTS, DPI_MIN, DPI_MAX, DPI_STEP, DEBOUNCE_MAX,
     BUTTON_NAMES, RATES, LOD, SLEEP, KEY_ACTIONS, PROFILE_COUNT, DPI_LIGHT, DPI_LIGHT_SPEED_MAX, BRIGHTNESS,
-    filters: [{ vendorId: VENDOR_ID }],
+    filters: VENDOR_IDS.map((vendorId) => ({ vendorId })),
     parse, decodeRate, encodeRate, decodeDpi, setDpi, snapDpi, setScalar, decodeKey, setKey, keyLabel, diffRuns, check,
     decodeDpiColor, setDpiColor, setDpiLightKind,
     CompxDevice,

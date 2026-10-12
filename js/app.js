@@ -430,7 +430,7 @@
     try {
       const picked = await navigator.hid.requestDevice({ filters: [...OMM.WebHidTransport.filters, ...OMM.compx.filters] });
       if (!picked.length) return;
-      if (picked[0].vendorId === OMM.compx.VENDOR_ID) return await connectCompx(picked);
+      if (OMM.compx.VENDOR_IDS.includes(picked[0].vendorId)) return await connectCompx(picked);
       const transport = new OMM.WebHidTransport(picked);
       if (!transport.out) throw new Error('선택한 기기에서 HID++ 인터페이스(리포트 0x11)를 찾지 못했습니다.');
       await connect(transport);

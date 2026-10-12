@@ -1,4 +1,4 @@
-// VGN 계열(compx.js) 기기의 설정 화면. 기기에서 읽은 플래시 이미지의 사본을 고치고,
+// VGN·ATK(compx.js) 기기의 설정 화면. 기기에서 읽은 플래시 이미지의 사본을 고치고,
 // 「기기에 저장」을 누르면 바뀐 바이트만 기록한 뒤 다시 읽어 대조한다.
 (function (OMM) {
   'use strict';
@@ -7,7 +7,10 @@
   const { h, choice, toast, busy, ask } = OMM.ui;
 
   // stageLimit: 연결했을 때 기기가 쓰고 있던 DPI 단계 수. 펌웨어가 몇 단계까지 받는지 알 수 없어 그보다 늘리지 않는다.
-  const cx = { dev: null, info: null, extras: null, orig: null, work: null, stageLimit: 0, tab: 'overview' };
+  // model: 기종별 선택지와 범위 (compx.js의 MODELS)
+  const cx = { dev: null, info: null, model: null, extras: null, orig: null, work: null, stageLimit: 0, tab: 'overview' };
+  const deviceName = () => cx.model.model || cx.dev.name;
+  const maxRate = () => Math.min(cx.info.maxRate, cx.model.maxRate);
 
   const connected = () => !!cx.work;
   const isDirty = () => connected() && C.diffRuns(cx.orig, cx.work).length > 0;
@@ -18,6 +21,10 @@
     cx.dev = dev;
     await dev.open();
     cx.info = await dev.identify();
+    cx.model = C.modelFor(dev.vendorId, cx.info.cid, cx.info.mid);
+    if (!cx.model) {
+      throw new Error(`${dev.name}: 아직 지원하지 않는 기종입니다 (식별값 ${cx.info.cid},${cx.info.mid}). 기종에 따라 DPI 저장 방식이 달라서 확인된 기종만 연결합니다.`);
+    }
     const { image, extras } = await dev.withControl(async () => ({
       image: await dev.readFlash(0, C.IMAGE_LENGTH),
       extras: await dev.readExtras(),
@@ -25,14 +32,14 @@
     // 읽은 값이 이 구조로 말이 되는지 확인한다. 아니면 다른 구조의 기기이므로 건드리지 않는다.
     const m = C.parse(image);
     const sane = C.RATES.includes(m.rate) && m.stageCount >= 1 && m.stageCount <= m.maxStages && m.currentStage < m.stageCount
-      && C.LOD.some(([v]) => v === m.lod) && image[C.FLASH.reportRate + 1] === C.check(image[C.FLASH.reportRate]);
+      && cx.model.lod.some(([v]) => v === m.lod) && image[C.FLASH.reportRate + 1] === C.check(image[C.FLASH.reportRate]);
     if (!sane) throw new Error(`${dev.name}: 설정 데이터가 알려진 구조와 맞지 않아 지원하지 않는 기기입니다.`);
     Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: m.stageCount, tab: 'overview' });
   }
 
   async function disconnect() {
     if (cx.dev) await cx.dev.close().catch(() => {});
-    Object.assign(cx, { dev: null, info: null, extras: null, orig: null, work: null });
+    Object.assign(cx, { dev: null, info: null, model: null, extras: null, orig: null, work: null });
   }
 
   const ownsDevice = (device) => !!cx.dev && cx.dev.devices.includes(device);
@@ -56,7 +63,7 @@
 
   // 프로필 카드 줄. 프로필 전환을 지원하지 않는 기기에서는 false를 돌려주고 아무것도 그리지 않는다.
   function renderProfiles(root) {
-    if (cx.extras.profile === null) {
+    if (cx.extras.profile === null || !cx.model.profiles) {
       root.replaceChildren();
       return false;
     }
@@ -75,7 +82,7 @@
   function summary() {
     const m = C.parse(cx.orig);
     return {
-      name: cx.dev.name,
+      name: deviceName(),
       modeText: cx.info.wired ? '유선 연결' : '무선 연결',
       dpi: m.stages[m.currentStage], rate: m.rate,
       profileLabel: cx.extras.profile !== null ? `프로필 ${cx.extras.profile + 1}` : null,
@@ -96,7 +103,7 @@
       return toast('왼쪽 클릭이 어느 버튼에도 할당되어 있지 않습니다. 한 버튼에는 왼쪽 클릭을 남겨 두세요.', 'error');
     }
     const ok = await ask('기기에 저장', [
-      `변경된 설정을 ${cx.dev.name}의 메모리에 씁니다.`,
+      `변경된 설정을 ${deviceName()}의 메모리에 씁니다.`,
       '쓰는 동안 기기를 분리하거나 전원을 끄지 마세요.',
     ], '저장');
     if (!ok) return;
@@ -139,7 +146,7 @@
   }
 
   function renderPerformance(m) {
-    const rates = C.RATES.filter((r) => r <= cx.info.maxRate).map((r) => [C.encodeRate(r), r >= 1000 ? `${r / 1000}K` : String(r)]);
+    const rates = C.RATES.filter((r) => r <= maxRate()).map((r) => [C.encodeRate(r), r >= 1000 ? `${r / 1000}K` : String(r)]);
     const setStageCount = (n) => {
       C.setScalar(cx.work, C.FLASH.stageCount, n);
       if (m.currentStage >= n) C.setScalar(cx.work, C.FLASH.currentStage, n - 1);
@@ -147,23 +154,23 @@
     };
     const rows = m.stages.slice(0, m.stageCount).map((dpi, i) => {
       const number = h('input', {
-        type: 'number', min: C.DPI_MIN, max: C.DPI_MAX, step: C.DPI_STEP, value: dpi,
-        onchange: (e) => { C.setDpi(cx.work, i, C.snapDpi(Number(e.target.value) || C.DPI_MIN)); edited(); },
+        type: 'number', min: cx.model.dpiMin, max: cx.model.dpiMax, step: C.DPI_STEP, value: dpi,
+        onchange: (e) => { C.setDpi(cx.work, i, C.snapDpi(Number(e.target.value) || cx.model.dpiMin, cx.model)); edited(); },
       });
       return h('div', { class: 'dpi-row' },
         h('span', { class: 'dpi-idx' }, `${i + 1}단계`),
         h('input', {
-          type: 'range', min: C.DPI_MIN, max: Math.max(C.DPI_MAX, dpi), step: C.DPI_STEP, value: dpi,
-          oninput: (e) => { const v = C.snapDpi(Number(e.target.value)); C.setDpi(cx.work, i, v); number.value = v; edited(false); },
+          type: 'range', min: cx.model.dpiMin, max: Math.max(cx.model.dpiMax, dpi), step: C.DPI_STEP, value: dpi,
+          oninput: (e) => { const v = C.snapDpi(Number(e.target.value), cx.model); C.setDpi(cx.work, i, v); number.value = v; edited(false); },
         }),
         number,
         h('label', null, h('input', { type: 'radio', name: 'cx-stage', checked: i === m.currentStage, onchange: () => scalar(C.FLASH.currentStage)(i) }), ' 현재'));
     });
     return h('div', null,
       field('보고율', 'Hz', choice('보고율', withCurrent(rates, cx.work[C.FLASH.reportRate]), cx.work[C.FLASH.reportRate], false, scalar(C.FLASH.reportRate))),
-      field('리프트오프 거리', null, choice('리프트오프 거리', withCurrent(C.LOD, m.lod), m.lod, false, scalar(C.FLASH.lod))),
+      field('리프트오프 거리', null, choice('리프트오프 거리', withCurrent(cx.model.lod, m.lod), m.lod, false, scalar(C.FLASH.lod))),
       h('p', { class: 'hint field-desc' }, '마우스를 들어 올렸을 때 추적이 멈추는 높이입니다.'),
-      h('h3', null, `DPI 단계 (${C.DPI_MIN}~${C.DPI_MAX.toLocaleString()})`),
+      h('h3', null, `DPI 단계 (${cx.model.dpiMin}~${cx.model.dpiMax.toLocaleString()})`),
       rows,
       h('div', { class: 'row-actions' },
         h('button', { disabled: m.stageCount >= Math.min(cx.stageLimit, m.maxStages), onclick: () => setStageCount(m.stageCount + 1) }, '+ 단계 추가'),
@@ -176,7 +183,7 @@
   }
 
   function renderButtons(m) {
-    const debounce = [...Array(C.DEBOUNCE_MAX + 1).keys()].map((v) => [v, String(v)]);
+    const debounce = cx.model.debounce.map((v) => [v, String(v)]);
     return h('div', null,
       field('디바운스', 'ms', choice('디바운스', withCurrent(debounce, m.debounce), m.debounce, false, scalar(C.FLASH.debounce))),
       h('p', { class: 'hint field-desc' }, '클릭 뒤 이 시간 동안은 같은 버튼의 추가 입력을 무시합니다. 더블클릭(채터링)이 생기면 값을 올리고, 반응을 빠르게 하려면 낮춥니다.'),
@@ -228,14 +235,15 @@
     // 절전 시간은 두 주소(절전, 성능 모드 시간)에 같은 값으로 저장된다.
     const setSleep = (v) => { C.setScalar(cx.work, C.FLASH.sleep, v); C.setScalar(cx.work, C.FLASH.performanceTime, v); edited(); };
     const info = [
-      ['기기', cx.dev.name],
+      ['기기', deviceName()],
+      ['연결 장치 이름', cx.dev.name],
       ['연결', cx.info.wired ? '유선' : '무선 (수신기)'],
-      ['최대 보고율', `${cx.info.maxRate.toLocaleString()} Hz`],
+      ['최대 보고율', `${maxRate().toLocaleString()} Hz`],
       ['펌웨어', [cx.extras.firmware && `마우스 ${cx.extras.firmware}`, cx.extras.dongleFirmware && `수신기 ${cx.extras.dongleFirmware}`].filter(Boolean).join(', ') || '알 수 없음'],
       ['기기 식별값', `CID 0x${cx.info.cid.toString(16)} · MID 0x${cx.info.mid.toString(16)} · 종류 ${cx.info.type}`],
     ];
     return h('div', null,
-      field('자동 절전', null, choice('자동 절전', withCurrent(C.SLEEP, m.sleep), m.sleep, false, setSleep)),
+      field('자동 절전', null, choice('자동 절전', withCurrent(cx.model.sleep, m.sleep), m.sleep, false, setSleep)),
       h('p', { class: 'hint field-desc' }, '이 시간 동안 움직임이 없으면 마우스가 절전 상태로 들어갑니다.'),
       h('h3', null, '기기 정보'),
       h('table', { class: 'info' }, info.map(([k, v]) => h('tr', null, h('th', null, k), h('td', null, v)))));
@@ -243,11 +251,12 @@
 
   function render(root) {
     const m = C.parse(cx.work);
-    const tabs = [['overview', '개요'], ['performance', '성능'], ['buttons', '버튼'], ['lighting', '조명'], ['advanced', '고급']];
+    const tabs = [['overview', '개요'], ['performance', '성능'], ['buttons', '버튼'], cx.model.lighting && ['lighting', '조명'], ['advanced', '고급']].filter(Boolean);
+    if (cx.tab === 'lighting' && !cx.model.lighting) cx.tab = 'overview';
     const body = cx.tab === 'performance' ? renderPerformance(m) : cx.tab === 'buttons' ? renderButtons(m)
       : cx.tab === 'lighting' ? renderLighting(m) : cx.tab === 'advanced' ? renderAdvanced(m) : renderOverview(m);
     root.replaceChildren(
-      h('div', { class: 'editor-head' }, h('h2', null, cx.dev.name)),
+      h('div', { class: 'editor-head' }, h('h2', null, deviceName())),
       h('nav', { class: 'tabs' }, tabs.map(([id, label]) => h('button', {
         class: id === cx.tab ? 'active' : '', onclick: () => { cx.tab = id; render(root); },
       }, label))),

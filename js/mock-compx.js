@@ -28,11 +28,13 @@
     return img;
   }
 
+  // identity: { vendorId, productName, cid, mid, type } 를 바꿔 다른 기종을 흉내 낼 수 있다.
   class MockCompxDevice {
-    constructor() {
-      this.vendorId = C.VENDOR_ID;
+    constructor(identity = {}) {
+      this.identity = { vendorId: C.VENDOR_VGN, productName: 'VGN Demo Mouse', cid: 0x12, mid: 0x34, type: 1, ...identity };
+      this.vendorId = this.identity.vendorId;
       this.productId = 0xfb49;
-      this.productName = 'VGN Demo Mouse';
+      this.productName = this.identity.productName;
       this.collections = [{ usagePage: 0xff02, usage: 2, inputReports: [{ reportId: 8 }], outputReports: [{ reportId: 8 }], featureReports: [] }];
       this.opened = false;
       // 프로필마다 설정 이미지가 따로 있다. 구분되도록 프로필별 첫 단계 DPI를 다르게 둔다.
@@ -64,7 +66,7 @@
     _handle(p, r) {
       const address = (p[2] << 8) | p[3];
       switch (p[0]) {
-        case 0x01: r.set([0x12, 0x34, 1, 0], 9); break; // cid, mid, 연결 종류(무선 4K), 수신기 종류
+        case 0x01: r.set([this.identity.cid, this.identity.mid, this.identity.type, 0], 9); break; // cid, mid, 연결 종류, 수신기 종류
         case 0x03: this.online = p[5] === 1; r[5] = 1; break;
         case 0x04: r.set([75, 0], 5); break;
         case 0x08: r.set(this.flash.subarray(address, address + p[4]), 5); break;
