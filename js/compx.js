@@ -26,8 +26,9 @@
   const DPI_SLOTS = 8;
   const BUTTON_NAMES = ['왼쪽', '오른쪽', '휠 클릭', '뒤로', '앞으로', 'DPI 버튼'];
   const DPI_MIN = 50;
-  const DPI_MAX = 26000;
+  const DPI_MAX = 42000;
   const DPI_STEP = 50;
+  const DPI_HIGH_FROM = 30100; // 이 값부터는 절반 값을 저장하고 "2배" 표시를 붙인다 (100 단위)
   // 식별 응답의 연결 종류 → 그 연결이 지원하는 최대 보고율
   const MAX_RATE_BY_TYPE = { 0: 1000, 1: 4000, 2: 1000, 3: 8000, 4: 2000, 5: 8000 };
   const RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
@@ -60,15 +61,23 @@
     return dpi;
   }
 
+  // dpi는 snapDpi를 거친 값이어야 한다. 실기기(DragonFly F2 Ultra+)에 저장돼 있던 42,000 DPI 기록
+  // a3 a3 55 ba 와 같은 바이트가 나오는 것을 확인했다.
   function setDpi(image, slot, dpi) {
-    const raw = dpi / DPI_STEP - 1;
+    const doubled = dpi >= DPI_HIGH_FROM;
+    const raw = (doubled ? dpi / 2 : dpi) / DPI_STEP - 1;
     const low = raw & 0xff;
     const high = (raw >> 8) & 0x03;
-    const flags = (high << 2) | (high << 6);
+    const flags = (high << 2) | (high << 6) | (doubled ? 0x11 : 0);
     image.set([low, low, flags, check(low + low + flags)], FLASH.dpi + 4 * slot);
   }
 
-  const snapDpi = (v) => Math.min(DPI_MAX, Math.max(DPI_MIN, Math.round(v / DPI_STEP) * DPI_STEP));
+  // 기기가 표현할 수 있는 값으로 맞춘다: 30,000까지 50 단위, 그 위로는 100 단위.
+  function snapDpi(v) {
+    const clamped = Math.min(DPI_MAX, Math.max(DPI_MIN, v));
+    if (clamped > (DPI_HIGH_FROM + 30000) / 2) return Math.max(DPI_HIGH_FROM, Math.round(clamped / 100) * 100);
+    return Math.min(30000, Math.round(clamped / DPI_STEP) * DPI_STEP);
+  }
 
   function setScalar(image, address, value) {
     image[address] = value;

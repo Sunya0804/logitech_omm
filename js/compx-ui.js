@@ -6,7 +6,8 @@
   const C = OMM.compx;
   const { h, choice, toast, busy, ask } = OMM.ui;
 
-  const cx = { dev: null, info: null, extras: null, orig: null, work: null, tab: 'overview' };
+  // stageLimit: 연결했을 때 기기가 쓰고 있던 DPI 단계 수. 펌웨어가 몇 단계까지 받는지 알 수 없어 그보다 늘리지 않는다.
+  const cx = { dev: null, info: null, extras: null, orig: null, work: null, stageLimit: 0, tab: 'overview' };
 
   const connected = () => !!cx.work;
   const isDirty = () => connected() && C.diffRuns(cx.orig, cx.work).length > 0;
@@ -26,7 +27,7 @@
     const sane = C.RATES.includes(m.rate) && m.stageCount >= 1 && m.stageCount <= m.maxStages && m.currentStage < m.stageCount
       && C.LOD.some(([v]) => v === m.lod) && image[C.FLASH.reportRate + 1] === C.check(image[C.FLASH.reportRate]);
     if (!sane) throw new Error(`${dev.name}: 설정 데이터가 알려진 구조와 맞지 않아 지원하지 않는 기기입니다.`);
-    Object.assign(cx, { extras, orig: image, work: image.slice(), tab: 'overview' });
+    Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: m.stageCount, tab: 'overview' });
   }
 
   async function disconnect() {
@@ -128,10 +129,10 @@
       field('보고율', 'Hz', choice('보고율', withCurrent(rates, cx.work[C.FLASH.reportRate]), cx.work[C.FLASH.reportRate], false, scalar(C.FLASH.reportRate))),
       field('리프트오프 거리', null, choice('리프트오프 거리', withCurrent(C.LOD, m.lod), m.lod, false, scalar(C.FLASH.lod))),
       h('p', { class: 'hint field-desc' }, '마우스를 들어 올렸을 때 추적이 멈추는 높이입니다.'),
-      h('h3', null, `DPI 단계 (${C.DPI_MIN}~${C.DPI_MAX.toLocaleString()}, ${C.DPI_STEP} 단위)`),
+      h('h3', null, `DPI 단계 (${C.DPI_MIN}~${C.DPI_MAX.toLocaleString()})`),
       rows,
       h('div', { class: 'row-actions' },
-        h('button', { disabled: m.stageCount >= m.maxStages, onclick: () => setStageCount(m.stageCount + 1) }, '+ 단계 추가'),
+        h('button', { disabled: m.stageCount >= Math.min(cx.stageLimit, m.maxStages), onclick: () => setStageCount(m.stageCount + 1) }, '+ 단계 추가'),
         h('button', { class: 'ghost', disabled: m.stageCount <= 1, onclick: () => setStageCount(m.stageCount - 1) }, '마지막 단계 빼기')),
       h('h3', null, '센서'),
       h('div', { class: 'toggle-list' },
