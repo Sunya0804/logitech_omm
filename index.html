@@ -6,7 +6,7 @@
   <title>Onboard Memory Manager (Web)</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body data-view="home">
   <aside id="rail">
     <div class="brand">
       <span class="logo">O</span>
@@ -14,7 +14,11 @@
     </div>
 
     <nav id="views" aria-label="화면">
-      <button data-view="config" class="active">
+      <button data-view="home" class="active">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg>
+        <span>홈</span>
+      </button>
+      <button data-view="config">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 2.5v7M6 9.5h12"/></svg>
         <span>기기 설정</span>
       </button>
@@ -34,13 +38,15 @@
 
   <div id="stage">
     <header id="topbar">
-      <h2 id="page-title">기기 설정</h2>
+      <h2 id="page-title">홈</h2>
       <div id="device"></div>
       <button id="btn-disconnect" class="ghost" hidden>연결 해제</button>
     </header>
 
     <main>
       <section id="welcome">
+        <div id="home-devices" class="device-grid" hidden></div>
+        <div id="home-hero">
         <div class="hero">
           <span class="hero-badge">WebHID · 설치 없이 브라우저에서</span>
           <h1>마우스를 연결하세요</h1>
@@ -70,6 +76,13 @@
           <li>G HUB나 Logitech Onboard Memory Manager가 실행 중이면 종료한 뒤 연결하세요.</li>
           <li>무선 기기는 수신기(동글)를 선택하면 됩니다. 기기 전원이 켜져 있어야 합니다.</li>
         </ul>
+        </div>
+      </section>
+
+      <section id="config-empty">
+        <h2>연결된 기기가 없습니다</h2>
+        <p class="hint">프로필을 편집하려면 먼저 마우스를 연결하세요.</p>
+        <button class="btn-connect primary">기기 연결</button>
       </section>
 
       <section id="tester"></section>

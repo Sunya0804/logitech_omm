@@ -15,7 +15,6 @@
   const LOD_LEVELS = [[1, '낮음'], [2, '중간'], [3, '높음']];
   const BUNNY_HOP_MS = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
   const ANALOG_BUTTON_NAMES = ['좌클릭', '우클릭'];
-  const CLASSIC_REPORT_RATES = [[1, '1000 Hz'], [2, '500 Hz'], [4, '250 Hz'], [8, '125 Hz']]; // 값 = 보고 간격(ms)
   const EXTENDED_RATE_INDEXES = [0, 1, 2, 3, 4, 5, 6]; // 값 = 인덱스, 125 << i Hz
   const DEFAULT_DPI_RANGE = { min: 100, max: 25600, step: 50 };
   const ROM_BASE = 0x0100;
@@ -28,7 +27,7 @@
     name: '', battery: null, desc: null, dpiRange: DEFAULT_DPI_RANGE, rateIndexes: null, analogCaps: null, layout: null,
     profiles: [], dirValid: false, crcTrusted: false,
     current: 0, mode: OMM.MODE.ONBOARD,
-    selected: 0, tab: 'dpi', layer: 'buttons', unlock: false, busy: false,
+    view: 'home', selected: 0, tab: 'overview', layer: 'buttons', unlock: false, busy: false,
   };
 
   // ---------- DOM 도우미 ----------
@@ -120,6 +119,7 @@
     });
     if (!ok) await disconnect();
     render();
+    if (ok) setView('config');
   }
 
   async function disconnect() {
@@ -381,13 +381,99 @@
 
   // ---------- 렌더링 ----------
 
+  const VIEW_TITLES = { home: '홈', config: '기기 설정', test: '마우스 테스트' };
+
+  function setView(view) {
+    st.view = view;
+    document.body.dataset.view = view;
+    for (const btn of document.querySelectorAll('#views button')) btn.classList.toggle('active', btn.dataset.view === view);
+    $('#page-title').textContent = VIEW_TITLES[view];
+  }
+
+  // 기기에 저장돼 있는 프로필의 요약: 기본 DPI, 보고율(Hz), DPI 단계 수. 읽을 수 없으면 null.
+  function profileSummary(p) {
+    if (!p || !p.orig || !layoutKnown()) return null;
+    const L = st.layout;
+    const m = P.parse(p.orig, L);
+    const stages = m.dpi.filter(Boolean);
+    const stage = m.dpi[m.defaultDpi] || stages[0];
+    const r = m.reportRates[0];
+    const rate = !L.reportRate.length ? null : L.rateUnit === 'ms' ? (r ? Math.round(1000 / r) : null) : 125 << r;
+    return { dpi: stage ? stage.x : null, rate, stages: stages.length };
+  }
+
+  const currentProfile = () => st.profiles.find(isCurrent);
+  const formatHz = (hz) => (hz >= 1000 ? `${hz / 1000}K` : String(hz));
+
+  // 여러 선택지 중 하나를 고르는 버튼 묶음. options: [[값, 표시]].
+  function choice(label, options, current, ro, onPick, extraClass = '') {
+    return h('div', { class: 'choice ' + extraClass, role: 'group', 'aria-label': label }, options.map(([v, text]) => h('button', {
+      class: v === current ? 'active' : '', disabled: ro, 'aria-pressed': String(v === current),
+      onclick: () => { if (v !== current) onPick(v); },
+    }, text)));
+  }
+
+  async function requestConnect() {
+    try {
+      const transport = await OMM.WebHidTransport.request();
+      if (transport) await connect(transport);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
+  function statusChips() {
+    const sum = profileSummary(currentProfile());
+    const cur = currentProfile();
+    const b = st.battery;
+    return [
+      sum && sum.dpi && h('span', { class: 'chip' }, `DPI ${sum.dpi.toLocaleString()}`),
+      sum && sum.rate && h('span', { class: 'chip' }, `${sum.rate.toLocaleString()} Hz`),
+      cur && h('span', { class: 'chip' }, profileTitle(cur)),
+      b && h('span', { class: 'chip', title: '배터리' },
+        h('span', { class: 'battery' + (b.percent <= 20 ? ' low' : '') }, h('i', { style: `width:${Math.min(100, b.percent)}%` })),
+        `${b.percent}%${b.charging ? ' ⚡' : ''}`),
+    ];
+  }
+
+  const MOUSE_ART = '<svg class="device-art" viewBox="0 0 200 300" aria-hidden="true">'
+    + '<defs><linearGradient id="art-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cc9ff"/><stop offset="1" stop-color="#8b7bff"/></linearGradient></defs>'
+    + '<rect x="32" y="14" width="136" height="272" rx="68" class="art-body"/>'
+    + '<path d="M100 14v114M32 128h136" class="art-line"/>'
+    + '<rect x="90" y="44" width="20" height="52" rx="10" class="art-wheel"/>'
+    + '<rect x="16" y="132" width="16" height="40" rx="7" class="art-side"/><rect x="16" y="178" width="16" height="40" rx="7" class="art-side"/>'
+    + '<path d="M72 236h56" class="art-glow"/></svg>';
+
+  // 홈: 연결된 기기 카드와 "다른 기기 연결" 카드.
+  function renderHome() {
+    const root = $('#home-devices');
+    if (!st.desc) return root.replaceChildren();
+    const art = h('div', { class: 'device-art-wrap' });
+    art.innerHTML = MOUSE_ART;
+    root.replaceChildren(
+      h('article', { class: 'device-card' },
+        h('div', { class: 'device-card-head' },
+          h('div', null, h('h3', null, st.name), h('p', { class: 'hint' }, st.mode === OMM.MODE.ONBOARD ? '온보드 메모리 모드' : '호스트 모드')),
+          h('span', { class: 'chip ok' }, '연결됨')),
+        art,
+        h('div', { class: 'device-chips' }, statusChips()),
+        h('button', { class: 'primary', onclick: () => setView('config') }, '설정 열기')),
+      h('article', { class: 'device-card add' },
+        h('h3', null, '다른 기기 연결'),
+        h('p', { class: 'hint' }, '한 번에 한 기기만 연결됩니다. 새 기기를 고르면 지금 기기와의 연결은 끊어집니다.'),
+        h('button', { onclick: requestConnect }, '+ 기기 선택')));
+  }
+
   function render() {
     const connected = !!st.desc;
-    $('#welcome').hidden = connected;
+    $('#home-hero').hidden = connected;
+    $('#home-devices').hidden = !connected;
+    $('#config-empty').hidden = connected;
     $('#workspace').hidden = !connected;
     $('#actionbar').hidden = !connected;
     $('#btn-disconnect').hidden = !connected;
     renderDeviceBar();
+    renderHome();
     if (!connected) return;
     renderSidebar();
     renderEditor();
@@ -397,12 +483,9 @@
   function renderDeviceBar() {
     const bar = $('#device');
     if (!st.desc) return bar.replaceChildren();
-    const b = st.battery;
     bar.replaceChildren(
       h('strong', null, st.name),
-      b && h('span', { class: 'chip', title: '배터리' },
-        h('span', { class: 'battery' + (b.percent <= 20 ? ' low' : '') }, h('i', { style: `width:${Math.min(100, b.percent)}%` })),
-        `${b.percent}%${b.charging ? ' ⚡' : ''}`),
+      ...statusChips().filter(Boolean),
       h('label', { class: 'chip' }, '모드 ',
         h('select', { onchange: (e) => setMode(Number(e.target.value)) },
           h('option', { value: OMM.MODE.ONBOARD, selected: st.mode === OMM.MODE.ONBOARD }, '온보드 메모리'),
@@ -467,11 +550,12 @@
     }
 
     const hasAnalog = layoutKnown() && st.layout.analog !== null;
-    const tabs = [['dpi', '감도 (DPI)'], ['buttons', '버튼 할당'], hasAnalog && ['analog', 'HITS 구성'], ['info', '기기 정보']].filter(Boolean);
-    if (st.tab === 'analog' && !hasAnalog) st.tab = 'dpi';
+    const tabs = [['overview', '개요'], ['dpi', '성능'], ['buttons', '버튼'], hasAnalog && ['analog', 'HITS 구성'], ['info', '고급']].filter(Boolean);
+    if (st.tab === 'analog' && !hasAnalog) st.tab = 'overview';
     const body = st.tab === 'info' ? renderInfo(p)
       : !p.raw ? h('p', { class: 'empty' }, '이 프로필은 기기에서 읽을 수 없습니다.')
       : !layoutKnown() ? h('p', { class: 'empty' }, '알 수 없는 프로필 형식입니다.')
+      : st.tab === 'overview' ? renderOverview(p)
       : st.tab === 'dpi' ? renderDpi(p) : st.tab === 'analog' ? renderAnalog(p) : renderButtons(p);
 
     root.replaceChildren(
@@ -498,31 +582,57 @@
   }
 
   // 보고율 바이트마다 선택 상자를 하나씩 만든다 (확장 구조는 무선/유선이 따로 있다).
+  // 개요: 프로필 이름과, 지금 편집 중인 값의 요약.
+  function renderOverview(p) {
+    const ro = !canEdit();
+    const L = st.layout;
+    const m = P.parse(p.raw, L);
+    const stages = m.dpi.filter(Boolean);
+    const def = m.dpi[m.defaultDpi] || stages[0];
+    const r = m.reportRates[0];
+    const rate = !L.reportRate.length ? null : L.rateUnit === 'ms' ? (r ? Math.round(1000 / r) : null) : 125 << r;
+    const tile = (label, value, sub) => h('div', { class: 'stat' }, h('small', null, label), h('b', null, value), sub && h('span', null, sub));
+    return h('div', null,
+      L.name !== null && h('div', { class: 'field' },
+        h('label', null, '프로필 이름'),
+        h('input', {
+          type: 'text', maxlength: P.NAME_CHARS, value: m.name, placeholder: `프로필 ${p.index + 1}`, disabled: ro,
+          oninput: (e) => { P.setName(p.raw, L, e.target.value); touched(false); },
+          onchange: () => renderEditor(),
+        })),
+      h('div', { class: 'stat-grid' },
+        tile('기본 DPI', def ? def.x.toLocaleString() : '–', `${stages.length}단계 중`),
+        tile('보고율', rate ? `${rate.toLocaleString()} Hz` : '–', L.reportRate[0] && L.reportRate[0].label),
+        tile('버튼', String(Math.min(st.desc.buttonCount, L.maxButtons)), st.desc.hasGShift ? 'G-Shift 지원' : null),
+        tile('상태', isCurrent(p) ? '사용 중' : p.enabled ? '사용' : '사용 안 함', p.source === 'rom' ? '초기값' : null)),
+      h('p', { class: 'hint' }, '값을 바꾸려면 위의 「성능」과 「버튼」 탭을 여세요. 변경 내용은 「기기에 저장」을 누르기 전까지 기기에 기록되지 않습니다.'));
+  }
+
+  // 보고율 바이트마다 버튼 묶음을 하나씩 만든다 (확장 구조는 무선/유선이 따로 있다).
   function reportRateFields(p, m, ro) {
     const L = st.layout;
-    const base = L.rateUnit === 'ms' ? CLASSIC_REPORT_RATES
-      : (st.rateIndexes || EXTENDED_RATE_INDEXES).map((i) => [i, `${125 << i} Hz`]).reverse();
+    const base = L.rateUnit === 'ms' ? [[8, '125'], [4, '250'], [2, '500'], [1, '1K']]
+      : (st.rateIndexes || EXTENDED_RATE_INDEXES).map((i) => [i, formatHz(125 << i)]);
     return L.reportRate.map((r, index) => {
       const cur = m.reportRates[index];
       const options = base.some(([v]) => v === cur) ? base : [...base, [cur, `기타 (${cur})`]];
+      const label = r.label ? `보고율 · ${r.label}` : '보고율';
       return h('div', { class: 'field' },
-        h('label', null, r.label ? `보고율 (${r.label})` : '보고율'),
-        h('select', { disabled: ro, onchange: (e) => { P.setReportRate(p.raw, L, index, Number(e.target.value)); touched(false); } },
-          options.map(([v, label]) => h('option', { value: v, selected: v === cur }, label))));
+        h('label', null, label, h('small', null, 'Hz')),
+        choice(label, options, cur, ro, (v) => { P.setReportRate(p.raw, L, index, v); touched(true); }));
     });
   }
 
   // 버니합(BHOP) 시간. 저장 값은 ms / 10이고 0은 끔. G HUB에서는 100~1000 ms 범위다.
   function bunnyHopField(p, m, ro) {
-    const options = [[0, '끔'], ...BUNNY_HOP_MS.map((ms) => [ms / 10, `${ms} ms`])];
+    const options = [[0, '끔'], ...BUNNY_HOP_MS.map((ms) => [ms / 10, String(ms)])];
     if (!options.some(([v]) => v === m.bunnyHop)) {
-      options.unshift([m.bunnyHop, m.bunnyHop === 0xff ? '설정 안 됨 (기기 기본값)' : `기타 (${m.bunnyHop * 10} ms)`]);
+      options.unshift([m.bunnyHop, m.bunnyHop === 0xff ? '설정 안 됨' : `기타 (${m.bunnyHop * 10})`]);
     }
     return [
       h('div', { class: 'field' },
-        h('label', null, '버니합 (BHOP)'),
-        h('select', { disabled: ro, onchange: (e) => { P.setBunnyHop(p.raw, st.layout, Number(e.target.value)); touched(false); } },
-          options.map(([v, label]) => h('option', { value: v, selected: v === m.bunnyHop }, label)))),
+        h('label', null, '버니합 (BHOP)', h('small', null, 'ms')),
+        choice('버니합', options, m.bunnyHop, ro, (v) => { P.setBunnyHop(p.raw, st.layout, v); touched(true); })),
       h('p', { class: 'hint field-desc' }, '휠 스크롤에 점프를 할당해 쓰는 게임을 위한 휠 설정입니다. 의도하지 않은 휠 움직임 때문에 점프가 엉뚱한 타이밍에 입력되는 것을 줄여 줍니다. 휠로 점프하지 않는다면 「끔」으로 두면 됩니다.'),
     ];
   }
@@ -553,11 +663,9 @@
         number,
         h('label', null, h('input', { type: 'radio', name: 'dpi-def', checked: i === def, disabled: ro, onchange: () => { def = i; commit(false); } }), ' 기본'),
         h('label', null, h('input', { type: 'radio', name: 'dpi-shift', checked: i === shift, disabled: ro, onchange: () => { shift = i; commit(false); } }), ' 시프트'),
-        L.lodEditable && h('select', {
-          title: '리프트오프 거리', 'aria-label': '리프트오프 거리', disabled: ro,
-          onchange: (e) => { stages[i].lod = Number(e.target.value); commit(false); },
-        }, (LOD_LEVELS.some(([v]) => v === stage.lod) ? LOD_LEVELS : [...LOD_LEVELS, [stage.lod, `기타 (${stage.lod})`]])
-          .map(([v, label]) => h('option', { value: v, selected: v === stage.lod }, `LOD ${label}`))),
+        L.lodEditable && h('span', { class: 'lod' }, h('small', null, 'LOD'),
+          choice('리프트오프 거리', LOD_LEVELS.some(([v]) => v === stage.lod) ? LOD_LEVELS : [...LOD_LEVELS, [stage.lod, `기타 (${stage.lod})`]],
+            stage.lod, ro, (v) => { stages[i].lod = v; commit(true); }, 'small')),
         h('button', {
           class: 'ghost', title: '단계 삭제', disabled: ro || stages.length <= 1,
           onclick: () => {
@@ -571,16 +679,9 @@
     });
 
     return h('div', null,
-      L.name !== null && h('div', { class: 'field' },
-        h('label', null, '프로필 이름'),
-        h('input', {
-          type: 'text', maxlength: P.NAME_CHARS, value: m.name, placeholder: `프로필 ${p.index + 1}`, disabled: ro,
-          oninput: (e) => { P.setName(p.raw, L, e.target.value); touched(false); },
-          onchange: () => renderEditor(),
-        })),
       reportRateFields(p, m, ro),
       m.bunnyHop !== null && bunnyHopField(p, m, ro),
-      h('h3', null, `DPI 단계 (${min}~${max})`),
+      h('h3', null, `DPI 단계 (${min.toLocaleString()}~${max.toLocaleString()})`),
       rows,
       h('button', {
         disabled: ro || stages.length >= P.DPI_SLOTS,
@@ -734,15 +835,10 @@
     $('#unsupported').hidden = supported;
     for (const btn of document.querySelectorAll('.btn-connect')) {
       btn.disabled = !supported;
-      btn.addEventListener('click', async () => {
-        try {
-          const transport = await OMM.WebHidTransport.request();
-          if (transport) await connect(transport);
-        } catch (e) {
-          toast(e.message, 'error');
-        }
-      });
+      btn.addEventListener('click', requestConnect);
     }
+    for (const btn of document.querySelectorAll('#views button')) btn.addEventListener('click', () => setView(btn.dataset.view));
+    setView(st.view);
     $('#btn-disconnect').addEventListener('click', async () => { await disconnect(); render(); });
     $('#btn-save').addEventListener('click', save);
     $('#btn-revert').addEventListener('click', revert);
@@ -769,6 +865,7 @@
 
   // 개발용: 콘솔에서 js/mock.js의 가상 기기를 OMM.connect(new OMM.MockTransport())로 연결할 수 있다.
   OMM.h = h;
+  OMM.setView = setView;
   OMM.state = st;
   OMM.connect = connect;
   init();

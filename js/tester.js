@@ -287,18 +287,11 @@
 
   // ---------- 화면 전환 ----------
 
-  const inTestView = () => document.body.classList.contains('view-test');
-
-  function setView(view) {
-    document.body.classList.toggle('view-test', view === 'test');
-    for (const btn of document.querySelectorAll('#views button')) btn.classList.toggle('active', btn.dataset.view === view);
-    document.querySelector('#page-title').textContent = view === 'test' ? '마우스 테스트' : '기기 설정';
-  }
+  const inTestView = () => document.body.dataset.view === 'test';
 
   function init() {
     build(document.querySelector('#tester'));
     reset();
-    for (const btn of document.querySelectorAll('#views button')) btn.addEventListener('click', () => setView(btn.dataset.view));
     // 뗌은 영역 밖에서 일어나도 받아야 눌림 상태가 남지 않는다. 테스트 화면에서는 뒤로/앞으로 버튼의 페이지 이동도 막는다.
     // 보고율은 테스트 화면 전체에서 잰다. pointerrawupdate는 화면 갱신 주기와 무관하게 입력이 들어오는 대로
     // 전달된다 (Chrome 계열). 창 밖으로 나가면 입력이 끊겨 RATE_IDLE_MS 뒤에 구간이 저절로 초기화된다.
@@ -312,7 +305,7 @@
 
   OMM.tester = {
     createButtonStats, recordDown, recordUp, createWheelStats, recordWheel,
-    createRateStats, recordMove, nearestStandardRate, state, setView,
+    createRateStats, recordMove, nearestStandardRate, state, setView: OMM.setView,
   };
   init();
 })(window.OMM);
