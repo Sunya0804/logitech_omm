@@ -191,6 +191,7 @@
     ], '저장');
     if (!ok) return;
 
+    let reloadFailed = false;
     const done = await busy('저장 중…', async (setMsg) => {
       const { op } = st;
       const writeVerified = async (sector, data, label) => {
@@ -214,12 +215,22 @@
         st.profiles.forEach((p) => (p.origEnabled = p.enabled));
       }
 
-      // 현재 프로필을 다시 지정해야 기기가 새 내용을 불러온다.
+      // 현재 프로필을 다시 지정해야 기기가 새 내용을 불러온다. 호스트 모드에서는 온보드 프로필이
+      // 쓰이지 않아 기기가 이 명령을 거부하므로 건너뛴다. 온보드 모드로 바꾸면 그때 불러온다.
+      if (st.mode !== OMM.MODE.ONBOARD) return;
       const active = st.profiles.find((p) => isCurrent(p) && p.enabled) || st.profiles.find((p) => p.enabled);
-      await op.setCurrentProfile(active.index + 1);
-      st.current = active.index + 1;
+      try {
+        await op.setCurrentProfile(active.index + 1);
+        st.current = active.index + 1;
+      } catch (e) {
+        // 기록과 검증은 이미 끝났으므로 저장 실패로 취급하지 않는다.
+        if (!(e instanceof OMM.HidppError)) throw e;
+        reloadFailed = true;
+      }
     });
-    if (done) toast('저장했습니다.', 'ok');
+    if (done && st.mode !== OMM.MODE.ONBOARD) toast('저장했습니다. 기기가 호스트 모드라서, 온보드 메모리 모드로 바꿔야 적용됩니다.', 'ok');
+    else if (done && reloadFailed) toast('저장했습니다. 기기가 프로필 다시 불러오기를 거부했으니, 마우스를 껐다 켜면 적용됩니다.', 'ok');
+    else if (done) toast('저장했습니다.', 'ok');
     render();
   }
 
@@ -243,6 +254,7 @@
     await busy('모드 변경 중…', async () => {
       await st.op.setMode(mode);
       st.mode = await st.op.getMode();
+      st.current = await st.op.getCurrentProfile();
     });
     render();
   }
@@ -423,7 +435,7 @@
         ` 이 기기의 프로필 형식(${st.desc.profileFormatId})은 검증되지 않았습니다. 값이 잘못 해석될 수 있음을 이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.`));
     }
     if (st.mode !== OMM.MODE.ONBOARD) {
-      notices.push('기기가 호스트 모드입니다. 온보드 프로필은 온보드 메모리 모드에서만 적용됩니다.');
+      notices.push('기기가 호스트 모드입니다. 온보드 프로필은 온보드 메모리 모드에서만 적용됩니다. G HUB가 실행 중이면 기기를 호스트 모드로 되돌리니 먼저 종료하세요.');
     }
 
     const tabs = [['dpi', '감도 (DPI)'], ['buttons', '버튼 할당'], ['info', '기기 정보']];
@@ -437,7 +449,7 @@
       h('div', { class: 'editor-head' },
         h('h2', null, profileTitle(p)),
         // 기기에 저장된 상태 그대로인 프로필만 바로 전환할 수 있다.
-        p.raw && !isCurrent(p) && p.origEnabled && !isDirty(p)
+        p.raw && !isCurrent(p) && p.origEnabled && !isDirty(p) && st.mode === OMM.MODE.ONBOARD
           && h('button', { onclick: () => activate(p) }, '이 프로필로 전환')),
       h('nav', { class: 'tabs' }, tabs.map(([id, label]) => h('button', {
         class: id === st.tab ? 'active' : '', onclick: () => { st.tab = id; renderEditor(); },
