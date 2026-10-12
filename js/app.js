@@ -766,6 +766,7 @@
   }
 
   // 개발용: 콘솔에서 js/mock.js의 가상 기기를 OMM.connect(new OMM.MockTransport())로 연결할 수 있다.
+  OMM.h = h;
   OMM.state = st;
   OMM.connect = connect;
   init();

@@ -9,6 +9,10 @@
 <body>
   <header>
     <h1><span class="logo">G</span> Onboard Memory Manager <small>Web</small></h1>
+    <nav id="views">
+      <button data-view="config" class="active">프로필 설정</button>
+      <button data-view="test">마우스 테스트</button>
+    </nav>
     <div id="device"></div>
     <button id="btn-disconnect" class="ghost" hidden>연결 해제</button>
   </header>
@@ -19,13 +23,17 @@
       <p>Logitech G 마우스의 온보드 메모리에 저장된 프로필(DPI, 보고율, 버튼 할당)을 브라우저에서 바로 읽고 수정합니다.</p>
       <p id="unsupported" class="notice" hidden>이 브라우저는 WebHID를 지원하지 않습니다. 데스크톱용 Chrome, Edge 또는 Opera에서 열어 주세요.</p>
       <div class="welcome-actions">
-        <button class="btn-connect primary">기기 연결</button>      </div>
+        <button class="btn-connect primary">기기 연결</button>
+      </div>
       <ul class="hint">
         <li>G HUB나 Logitech Onboard Memory Manager가 실행 중이면 종료한 뒤 연결하세요.</li>
         <li>무선 기기는 수신기(동글)를 선택하면 됩니다. 기기 전원이 켜져 있어야 합니다.</li>
         <li>변경 내용은 「기기에 저장」을 누르기 전까지 기기에 기록되지 않습니다.</li>
+        <li>더블클릭·버튼·휠 검사는 위의 「마우스 테스트」에서 기기 연결 없이 할 수 있습니다.</li>
       </ul>
     </section>
+
+    <section id="tester"></section>
 
     <div id="workspace" hidden>
       <aside id="sidebar"></aside>
@@ -62,5 +70,6 @@
   <script src="js/hidpp.js"></script>
   <script src="js/keys.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/tester.js"></script>
 </body>
 </html>

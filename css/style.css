@@ -67,6 +67,9 @@ header h1 small { color: var(--accent); font-weight: 400; }
   color: var(--accent-text);
   font-weight: 800;
 }
+#views { display: flex; gap: 4px; }
+#views button { border-color: transparent; background: none; color: var(--muted); }
+#views button.active { background: var(--panel-2); color: var(--text); }
 #device { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .chip { padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 13px; }
 .chip select { border: 0; background: transparent; padding: 2px; }
@@ -199,7 +202,61 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; margin: 18px 0
 .toast.error { border-left-color: var(--error); }
 .toast.ok { border-left-color: var(--ok); }
 
+/* 마우스 테스트 화면 */
+body:not(.view-test) #tester,
+body.view-test #welcome,
+body.view-test #workspace,
+body.view-test #actionbar { display: none !important; }
+#tester { max-width: 1100px; margin: 0 auto; padding: 24px 28px; }
+.test-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.test-head .hint { margin: 4px 0 0; }
+.test-layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr); gap: 24px; margin-top: 20px; }
+.test-layout h3:first-child { margin-top: 0; }
+.test-pad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: 300px;
+  padding: 20px;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  user-select: none;
+  cursor: crosshair;
+}
+.test-pad:hover { border-color: var(--accent); }
+.test-pad-title { margin: 0; color: var(--muted); }
+.test-tiles { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.test-tile { min-width: 76px; padding: 14px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); color: var(--muted); text-align: center; }
+.test-tile.seen { color: var(--text); border-color: var(--ok); }
+.test-tile.bad { color: var(--text); border-color: var(--error); }
+.test-tile.down { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
+.test-wheel { color: var(--muted); }
+.wheel-mark { display: inline-block; width: 1.4em; color: var(--accent); font-size: 18px; text-align: center; }
+.test-verdict { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; padding: 12px 16px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; background: var(--panel); }
+.test-verdict strong { font-size: 16px; }
+.test-verdict span { color: var(--muted); font-size: 13px; }
+.test-verdict.good { border-left-color: var(--ok); }
+.test-verdict.bad { border-left-color: var(--error); }
+.test-table th, .test-table td { padding: 6px 8px; border-top: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; }
+.test-table thead th { border-top: 0; font-size: 12px; font-weight: 400; color: var(--muted); }
+.test-table th:first-child { text-align: left; font-weight: 400; }
+.test-table td.bad { color: var(--error); font-weight: 700; }
+.test-threshold { margin-top: 16px; }
+.test-threshold input { width: 80px; }
+.test-threshold .hint { margin: 0; }
+.test-log { margin: 0; padding: 0; list-style: none; max-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.test-log li { padding: 6px 10px; border-top: 1px solid var(--border); font-size: 13px; }
+.test-log li:first-child { border-top: 0; }
+.test-log li.empty { color: var(--muted); }
+.test-log time { margin-right: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#tester > ul.hint { margin-top: 24px; }
+
 @media (max-width: 720px) {
+  .test-layout { grid-template-columns: 1fr; }
+  #tester { padding: 16px; }
   #workspace { flex-direction: column; }
   #sidebar { width: auto; border-right: 0; border-bottom: 1px solid var(--border); }
   #editor { padding: 16px; }
