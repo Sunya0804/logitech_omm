@@ -243,6 +243,9 @@ ul.hint li { margin: 4px 0; }
 .lod { display: inline-flex; align-items: center; gap: 6px; }
 .lod small { margin: 0; }
 
+.row-actions { display: flex; gap: 8px; margin-top: 8px; }
+.toggle-list .hits-toggle:first-child { border-top: 0; }
+
 /* 개요의 요약 칸 */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 18px 0 6px; }
 .stat { display: flex; flex-direction: column; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }

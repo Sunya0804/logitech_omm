@@ -42,17 +42,10 @@
       return device.collections.some((c) => c.outputReports.some((r) => r.reportId === id));
     }
 
-    // 사용자에게 기기 선택 창을 띄운다. 취소하면 null.
-    static async request() {
-      // HID++ 인터페이스(벤더 전용 usage page)가 있는 기기만 보여 준다. 벤더 ID만으로 거르면
-      // G HUB가 설치한 가상 마우스/키보드 같은 장치까지 목록에 나온다.
-      const picked = await navigator.hid.requestDevice({
-        filters: HIDPP_USAGE_PAGES.map((usagePage) => ({ vendorId: VENDOR_LOGITECH, usagePage })),
-      });
-      if (!picked.length) return null;
-      const t = new WebHidTransport(picked);
-      if (!t.out) throw new Error('선택한 기기에서 HID++ 인터페이스(리포트 0x11)를 찾지 못했습니다.');
-      return t;
+    // 기기 선택 창에 쓰는 필터. HID++ 인터페이스(벤더 전용 usage page)가 있는 기기만 보여 준다.
+    // 벤더 ID만으로 거르면 G HUB가 설치한 가상 마우스/키보드 같은 장치까지 목록에 나온다.
+    static get filters() {
+      return HIDPP_USAGE_PAGES.map((usagePage) => ({ vendorId: VENDOR_LOGITECH, usagePage }));
     }
 
     get name() {

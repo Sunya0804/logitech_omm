@@ -122,7 +122,19 @@
     if (ok) setView('config');
   }
 
+  // 다른 프로토콜(compx-ui.js)로 연결된 기기가 있는지. 그 모듈은 이 파일보다 늦게 로드된다.
+  const compx = () => (OMM.compxUi && OMM.compxUi.connected() ? OMM.compxUi : null);
+
+  async function connectCompx(devices) {
+    await disconnect();
+    const ok = await busy('기기 읽는 중…', () => OMM.compxUi.connect(devices));
+    if (!ok) await OMM.compxUi.disconnect();
+    render();
+    if (ok) setView('config');
+  }
+
   async function disconnect() {
+    if (OMM.compxUi) await OMM.compxUi.disconnect();
     if (st.transport) await st.transport.close().catch(() => {});
     Object.assign(st, { transport: null, hidpp: null, op: null, desc: null, layout: null, profiles: [], selected: 0, unlock: false });
   }
@@ -413,23 +425,38 @@
     }, text)));
   }
 
+  // 기기 선택 창을 띄우고, 고른 기기의 제조사에 맞는 방식으로 연결한다.
   async function requestConnect() {
     try {
-      const transport = await OMM.WebHidTransport.request();
-      if (transport) await connect(transport);
+      const picked = await navigator.hid.requestDevice({ filters: [...OMM.WebHidTransport.filters, ...OMM.compx.filters] });
+      if (!picked.length) return;
+      if (picked[0].vendorId === OMM.compx.VENDOR_ID) return await connectCompx(picked);
+      const transport = new OMM.WebHidTransport(picked);
+      if (!transport.out) throw new Error('선택한 기기에서 HID++ 인터페이스(리포트 0x11)를 찾지 못했습니다.');
+      await connect(transport);
     } catch (e) {
       toast(e.message, 'error');
     }
   }
 
-  function statusChips() {
-    const sum = profileSummary(currentProfile());
+  // 홈 카드와 상태 줄에 쓰는 요약: {name, modeText, dpi, rate, profileLabel, battery}
+  function deviceSummary() {
+    if (compx()) return compx().summary();
     const cur = currentProfile();
-    const b = st.battery;
+    const sum = profileSummary(cur) || {};
+    return {
+      name: st.name, modeText: st.mode === OMM.MODE.ONBOARD ? '온보드 메모리 모드' : '호스트 모드',
+      dpi: sum.dpi, rate: sum.rate, profileLabel: cur ? profileTitle(cur) : null, battery: st.battery,
+    };
+  }
+
+  function statusChips() {
+    const sum = deviceSummary();
+    const b = sum.battery;
     return [
-      sum && sum.dpi && h('span', { class: 'chip' }, `DPI ${sum.dpi.toLocaleString()}`),
-      sum && sum.rate && h('span', { class: 'chip' }, `${sum.rate.toLocaleString()} Hz`),
-      cur && h('span', { class: 'chip' }, profileTitle(cur)),
+      sum.dpi && h('span', { class: 'chip' }, `DPI ${sum.dpi.toLocaleString()}`),
+      sum.rate && h('span', { class: 'chip' }, `${sum.rate.toLocaleString()} Hz`),
+      sum.profileLabel && h('span', { class: 'chip' }, sum.profileLabel),
       b && h('span', { class: 'chip', title: '배터리' },
         h('span', { class: 'battery' + (b.percent <= 20 ? ' low' : '') }, h('i', { style: `width:${Math.min(100, b.percent)}%` })),
         `${b.percent}%${b.charging ? ' ⚡' : ''}`),
@@ -447,13 +474,14 @@
   // 홈: 연결된 기기 카드와 "다른 기기 연결" 카드.
   function renderHome() {
     const root = $('#home-devices');
-    if (!st.desc) return root.replaceChildren();
+    if (!st.desc && !compx()) return root.replaceChildren();
+    const sum = deviceSummary();
     const art = h('div', { class: 'device-art-wrap' });
     art.innerHTML = MOUSE_ART;
     root.replaceChildren(
       h('article', { class: 'device-card' },
         h('div', { class: 'device-card-head' },
-          h('div', null, h('h3', null, st.name), h('p', { class: 'hint' }, st.mode === OMM.MODE.ONBOARD ? '온보드 메모리 모드' : '호스트 모드')),
+          h('div', null, h('h3', null, sum.name), h('p', { class: 'hint' }, sum.modeText)),
           h('span', { class: 'chip ok' }, '연결됨')),
         art,
         h('div', { class: 'device-chips' }, statusChips()),
@@ -465,7 +493,7 @@
   }
 
   function render() {
-    const connected = !!st.desc;
+    const connected = !!st.desc || !!compx();
     $('#home-hero').hidden = connected;
     $('#home-devices').hidden = !connected;
     $('#config-empty').hidden = connected;
@@ -475,6 +503,14 @@
     renderDeviceBar();
     renderHome();
     if (!connected) return;
+    // 프로필 목록과 백업·진단은 Logitech 온보드 프로필 전용이다.
+    $('#sidebar').hidden = !!compx();
+    for (const id of ['#btn-diagnostics', '#btn-export', '#btn-import']) $(id).hidden = !!compx();
+    if (compx()) {
+      compx().render($('#editor'));
+      renderActionBar();
+      return;
+    }
     renderSidebar();
     renderEditor();
     renderActionBar();
@@ -482,6 +518,7 @@
 
   function renderDeviceBar() {
     const bar = $('#device');
+    if (compx()) return bar.replaceChildren(h('strong', null, deviceSummary().name), ...statusChips().filter(Boolean));
     if (!st.desc) return bar.replaceChildren();
     bar.replaceChildren(
       h('strong', null, st.name),
@@ -518,6 +555,13 @@
   }
 
   function renderActionBar() {
+    if (compx()) {
+      const dirty = compx().isDirty();
+      $('#dirty-count').textContent = dirty ? '저장되지 않은 변경이 있습니다' : '변경 사항 없음';
+      $('#btn-save').disabled = !dirty;
+      $('#btn-revert').disabled = !dirty;
+      return;
+    }
     const n = st.profiles.filter(isDirty).length;
     $('#dirty-count').textContent = n ? `저장되지 않은 변경: 프로필 ${n}개` : '변경 사항 없음';
     $('#btn-save').disabled = !n || !canEdit();
@@ -840,8 +884,8 @@
     for (const btn of document.querySelectorAll('#views button')) btn.addEventListener('click', () => setView(btn.dataset.view));
     setView(st.view);
     $('#btn-disconnect').addEventListener('click', async () => { await disconnect(); render(); });
-    $('#btn-save').addEventListener('click', save);
-    $('#btn-revert').addEventListener('click', revert);
+    $('#btn-save').addEventListener('click', () => (compx() ? compx().save() : save()));
+    $('#btn-revert').addEventListener('click', () => (compx() ? compx().revert() : revert()));
     $('#btn-export').addEventListener('click', exportBackup);
     $('#btn-diagnostics').addEventListener('click', exportDiagnostics);
     $('#btn-import').addEventListener('click', () => $('#import-file').click());
@@ -851,14 +895,16 @@
     });
     if (supported) {
       navigator.hid.addEventListener('disconnect', async (e) => {
-        if (!st.transport || !st.transport.devices || !st.transport.devices.includes(e.device)) return;
+        const ours = (st.transport && st.transport.devices && st.transport.devices.includes(e.device))
+          || (OMM.compxUi && OMM.compxUi.ownsDevice(e.device));
+        if (!ours) return;
         await disconnect();
         render();
         toast('기기 연결이 끊어졌습니다.', 'error');
       });
     }
     window.addEventListener('beforeunload', (e) => {
-      if (st.profiles.some(isDirty)) e.preventDefault();
+      if (st.profiles.some(isDirty) || (compx() && compx().isDirty())) e.preventDefault();
     });
     render();
   }
@@ -866,6 +912,8 @@
   // 개발용: 콘솔에서 js/mock.js의 가상 기기를 OMM.connect(new OMM.MockTransport())로 연결할 수 있다.
   OMM.h = h;
   OMM.setView = setView;
+  OMM.ui = { h, choice, toast, busy, ask, refresh: render, refreshActions: renderActionBar };
+  OMM.connectCompx = connectCompx;
   OMM.state = st;
   OMM.connect = connect;
   init();
