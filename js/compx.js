@@ -60,11 +60,29 @@
   const decodeRate = (v) => (v >= 16 ? (v / 16) * 2000 : v ? 1000 / v : null);
   const encodeRate = (hz) => (hz <= 1000 ? 1000 / hz : (hz / 2000) * 16);
 
+  // Ultra 센서의 DPI 표현: 10,000까지 10 단위, 그 위로 30,000까지 50 단위(플래그 비트 1), 30,000을 넘으면
+  // 절반 값을 저장하고 2배 표시(비트 0)를 붙인다. 실기기(F1 LEVIATAN 2.0)에서 읽은 기록 27 27 00 07(400),
+  // 3f 3f 44 93(3,200)이 ATK HUB에 보이는 값과 맞는 것을 확인했다. 높은 영역은 OpenMouse의 정리를 따랐다.
+  function decodeUltra(low, flags) {
+    const code = (((flags >> 2) & 0x03) << 8) | low;
+    const base = flags & 0x02 ? 10050 + code * 50 : (code + 1) * 10;
+    return flags & 0x01 ? base * 2 : base;
+  }
+
+  function encodeUltra(dpi) {
+    const doubled = dpi > 30000;
+    const value = doubled ? dpi / 2 : dpi;
+    const high = value > 10000;
+    const code = high ? (value - 10050) / 50 : value / 10 - 1;
+    return { low: code & 0xff, nibble: ((code >> 8) << 2) | (high ? 2 : 0) | (doubled ? 1 : 0) };
+  }
+
   // DPI 기록 [가로 값, 세로 값, 플래그, 검사]. 검사가 맞지 않으면 null. 가로 값을 그 단계의 DPI로 본다.
-  function decodeDpi(image, slot) {
+  function decodeDpi(image, slot, model = MODELS.vgn) {
     const o = FLASH.dpi + 4 * slot;
     const [low, lowY, flags, sum] = image.subarray(o, o + 4);
     if (((low + lowY + flags + sum) & 0xff) !== 0x55) return null;
+    if (model.dpiCodec === 'ultra') return decodeUltra(low, flags);
     let dpi = ((((flags >> 2) & 0x03) << 8) + low + 1) * DPI_STEP;
     if (flags & 0x01) dpi *= 2; // 높은 DPI 영역 표시. 이 범위는 읽기만 하고 직접 쓰지는 않는다.
     if (flags & 0x02) dpi *= 2;
@@ -73,7 +91,13 @@
 
   // dpi는 snapDpi를 거친 값이어야 한다. 실기기(DragonFly F2 Ultra+)에 저장돼 있던 42,000 DPI 기록
   // a3 a3 55 ba 와 같은 바이트가 나오는 것을 확인했다.
-  function setDpi(image, slot, dpi) {
+  function setDpi(image, slot, dpi, model = MODELS.vgn) {
+    if (model.dpiCodec === 'ultra') {
+      const { low, nibble } = encodeUltra(dpi);
+      const mode = (nibble << 4) | nibble;
+      image.set([low, low, mode, check(low + low + mode)], FLASH.dpi + 4 * slot);
+      return;
+    }
     const doubled = dpi >= DPI_HIGH_FROM;
     const raw = (doubled ? dpi / 2 : dpi) / DPI_STEP - 1;
     const low = raw & 0xff;
@@ -82,12 +106,17 @@
     image.set([low, low, flags, check(low + low + flags)], FLASH.dpi + 4 * slot);
   }
 
-  // 기기가 표현할 수 있는 값으로 맞춘다: 30,000까지 50 단위, 그 위로는 100 단위.
   // 기종별 차이. lod / sleep: [저장 값, 표시], debounce: 고를 수 있는 값(ms), maxRate: 기종 자체의 보고율 상한.
   // lighting / profiles: DPI 표시등 설정과 프로필 전환을 화면에 낼지 (확인된 기종만 켠다).
+  // dpiCodec: DPI 저장 방식 (없으면 50 단위, 'ultra'는 10 단위부터), dpiStep: 화면에서 쓰는 가장 작은 간격.
   const ATK_COMMON = {
-    brand: 'ATK', debounce: [0, 1, 2, 4, 8, 15, 20], lighting: false, profiles: false,
+    brand: 'ATK', debounce: [0, 1, 2, 4, 8, 15, 20], lighting: false, profiles: true,
     sleep: [[3, '30초'], [6, '1분'], [12, '2분'], [18, '3분'], [30, '5분'], [120, '20분'], [150, '25분'], [180, '30분']],
+  };
+  // PAW3950 Ultra 센서 기종. 리프트오프는 0.1 mm 눈금이고 저장 값 1이 0.7 mm다.
+  const ATK_ULTRA = {
+    ...ATK_COMMON, dpiCodec: 'ultra', dpiStep: 10, dpiMin: 10, dpiMax: 42000, maxRate: 8000,
+    lod: [...Array(11).keys()].map((i) => [i + 1, `${((i + 7) / 10).toFixed(1)} mm`]),
   };
   const MODELS = {
     // 실기기(DragonFly F2 Ultra+)로 확인한 VGN 기본값
@@ -99,16 +128,49 @@
     // 값은 OpenMouse가 ATK HUB와 실기기로 대조해 둔 내용을 따랐다. 이 프로젝트에서 실기기로 확인한 적은 없다.
     'atk:2,39': { ...ATK_COMMON, model: 'ATK X1 Pro Max', dpiMin: 50, dpiMax: 36000, maxRate: 8000, lod: [[3, '0.7 mm'], [1, '1 mm'], [2, '2 mm']] },
     'atk:2,83': { ...ATK_COMMON, model: 'ATK A9 Plus Nearlink', dpiMin: 100, dpiMax: 30000, maxRate: 1000, lod: [[1, '1 mm'], [2, '2 mm']] },
+    // PAW3950 Ultra. 실기기(8K 수신기 연결)에서 읽은 DPI 단계와 리프트오프 값이 ATK HUB와 맞는 것을 확인했다.
+    // 식별값 1,13은 DPI 기록이 6바이트인 다른 기종(X1 Ultra Max 2.0 + Tri-Mode)도 쓰는데, 그 기기는
+    // 4바이트 기록의 검사가 맞지 않아 연결 단계에서 걸러진다.
+    'atk:1,13': { ...ATK_ULTRA, model: 'ATK F1 LEVIATAN 2.0' },
+    // 실기기(8K 수신기 연결)의 설정 메모리가 F1 LEVIATAN 2.0과 같은 구조로 읽히는 것을 확인했다.
+    'atk:1,24': { ...ATK_ULTRA, model: 'ATK Ghost Ultimate' },
+    // 2026-10-14: 사용자가 A9 Ultra의 GOMM 동작을 확인하고 경고 제거를 요청했다.
+    // 미확인 리프트오프 값과 기존 디바운스 선택지는 확장하지 않는다.
+    'atk:2,87': { ...ATK_ULTRA, model: 'ATK A9 Ultra', lod: null, debounce: [1, 2, 4, 8, 15, 20], verified: true },
+  };
+
+  // 실기기로 확인하지 못한 기종(compx-models.js)에 쓰는 설정. 기종표로 알 수 있는 것은 센서별 DPI 범위와 저장 방식뿐이다.
+  // 리프트오프는 기종마다 저장 값의 뜻이 달라 바꾸지 못하게 하고(lod: null), 디바운스 0 ms는 받지 않는 기종이 있어 뺀다.
+  const UNVERIFIED_DPI = {
+    ultra: { dpiCodec: 'ultra', dpiStep: 10, dpiMin: 10, dpiMax: 42000 },
+    paw3950: { dpiMin: 50, dpiMax: 36000 },
+    paw3395: { dpiMin: 100, dpiMax: 30000 },
+    core26k: { dpiMin: 50, dpiMax: 26000 },
   };
 
   // 식별 응답(cid, mid)에 맞는 기종 설정. 지원하지 않는 기종이면 null.
+  // verified가 false인 기종은 사용자가 읽힌 값을 확인해야 편집이 열린다.
   function modelFor(vendorId, cid, mid) {
     if (vendorId === VENDOR_VGN) return MODELS.vgn;
-    return MODELS[`atk:${cid},${mid}`] || null;
+    const key = `${cid},${mid}`;
+    if (MODELS[`atk:${key}`]) return MODELS[`atk:${key}`];
+    for (const [group, names] of Object.entries(OMM.compxCatalog || {})) {
+      if (names[key]) {
+        return { ...ATK_COMMON, ...UNVERIFIED_DPI[group], model: names[key], maxRate: 8000, lod: null, debounce: [1, 2, 4, 8, 15, 20], verified: false };
+      }
+    }
+    return null;
   }
 
+  // 기기가 표현할 수 있는 값으로 맞춘다: 30,000까지 50 단위, 그 위로는 100 단위.
+  // Ultra 방식은 10,000까지 10 단위이고 그 위는 10,050부터 50 단위, 30,100부터 100 단위다.
   function snapDpi(v, model = MODELS.vgn) {
     const clamped = Math.min(model.dpiMax, Math.max(model.dpiMin, v));
+    if (model.dpiCodec === 'ultra') {
+      if (clamped <= 10025) return Math.min(10000, Math.round(clamped / 10) * 10);
+      if (clamped <= 30050) return Math.min(30000, Math.max(10050, Math.round(clamped / 50) * 50));
+      return Math.max(DPI_HIGH_FROM, Math.round(clamped / 100) * 100);
+    }
     if (clamped > (DPI_HIGH_FROM + 30000) / 2) return Math.max(DPI_HIGH_FROM, Math.round(clamped / 100) * 100);
     return Math.min(30000, Math.round(clamped / DPI_STEP) * DPI_STEP);
   }
@@ -165,9 +227,9 @@
     return known ? known[2] : `기타 (${key.cls}:0x${key.param.toString(16).padStart(4, '0')})`;
   }
 
-  function parse(image) {
+  function parse(image, model = MODELS.vgn) {
     const stages = [];
-    for (let i = 0; i < DPI_SLOTS; i++) stages.push(decodeDpi(image, i));
+    for (let i = 0; i < DPI_SLOTS; i++) stages.push(decodeDpi(image, i, model));
     // 쓸 수 있는 단계 수: 앞에서부터 연속으로 유효한 기록이 있는 칸까지
     const usable = stages.findIndex((s) => s === null);
     return {
@@ -323,6 +385,7 @@
 
     // 프로필(0부터)을 바꾼다. 바꾼 뒤에는 설정 이미지를 다시 읽어야 한다.
     setProfile(index) {
+      if (!Number.isInteger(index) || index < 0 || index >= PROFILE_COUNT) throw new Error('프로필 번호가 범위를 벗어났습니다.');
       return this.accepted(CMD.SET_PROFILE, (p) => p.set([1, index], 4), '프로필 전환');
     }
 
@@ -337,7 +400,7 @@
       return {
         battery: battery && battery[5] <= 100 ? { percent: battery[5], charging: battery[6] === 1 } : null,
         firmware: ver(version), dongleFirmware: ver(dongle),
-        profile: profile ? profile[5] : null,
+        profile: profile && profile[5] < PROFILE_COUNT ? profile[5] : null,
       };
     }
   }

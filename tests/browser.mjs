@@ -1,0 +1,135 @@
+// Usage: node tests/browser.mjs /path/to/playwright-core/index.mjs /path/to/chrome
+import http from 'node:http';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+const { chromium } = await import(pathToFileURL(path.resolve(process.argv[2])));
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const server = http.createServer(async (req, res) => {
+  try {
+    const file = path.resolve(root, '.' + decodeURIComponent(new URL(req.url, 'http://localhost').pathname));
+    if (!file.startsWith(root + path.sep) && file !== root) throw new Error('outside root');
+    const target = file === root ? path.join(root, 'index.html') : file;
+    res.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png' })[path.extname(target)] || 'text/plain');
+    res.end(await fs.readFile(target));
+  } catch { res.writeHead(404); res.end(); }
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+let browser;
+try {
+  browser = await chromium.launch({ executablePath: process.argv[3], headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.waitForFunction(() => !!window.OMM?.mchoseUi);
+  await page.evaluate(async () => {
+    const { CapturedMouse } = await import('/tests/mchose-fixture.mjs');
+    window.captures = await (await fetch('/tests/fixtures/mchose-hardware.json')).json();
+    window.makeMouse = i => new CapturedMouse(window.captures[i]);
+    const timer = window.setTimeout;
+    window.setTimeout = (fn, ms, ...args) => timer(fn, ms >= 8000 ? ms : Math.min(ms, 5), ...args);
+    window.mockMouse = window.makeMouse(0);
+    await OMM.connectMchose([window.mockMouse]);
+  });
+  assert.equal(await page.locator('#editor h2').textContent(), 'MCHOSE K7 Ultra');
+  await page.getByRole('button', { name: '성능', exact: true }).click();
+  assert.equal(await page.locator('#editor input[type=number]').first().isDisabled(), true);
+  await page.locator('.mchose-unlock input').check();
+  await page.locator('#editor input[type=number]').first().fill('900');
+  await page.locator('#editor input[type=number]').first().blur();
+  assert.equal(await page.evaluate(() => mockMouse.writes.length), 0);
+  await page.locator('#btn-save').click();
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy && !OMM.mchoseUi.isDirty());
+  assert.doesNotMatch(await page.locator('#editor').textContent(), /undefined|falsefalse/);
+  assert.equal(await page.evaluate(() => OMM.mchoseUi.state.original.dpiStages[0]), 900);
+  await page.screenshot({ path: path.join(root, '.local-tools/mchose-ui.png'), fullPage: true });
+  await page.evaluate(async () => { window.previousMouse = mockMouse; window.mockMouse = makeMouse(1); await OMM.connectMchose([mockMouse]); });
+  assert.equal(await page.evaluate(() => previousMouse.opened), false);
+  assert.equal(await page.locator('#editor h2').textContent(), 'MCHOSE A7 V2 Ultra+');
+  assert.equal(await page.evaluate(() => OMM.mchoseUi.state.original.pollingRateHz), 4000);
+  await page.addScriptTag({ url: '/js/mock.js' });
+  await page.evaluate(async () => { await OMM.connect(new OMM.MockTransport()); });
+  assert.equal(await page.evaluate(() => OMM.mchoseUi.connected()), false);
+  assert.equal(await page.locator('#btn-export').isVisible(), true);
+  await page.addScriptTag({ url: '/js/mock-compx.js' });
+  await page.evaluate(async () => { await OMM.connectCompx([new OMM.MockCompxDevice()]); });
+  assert.equal(await page.evaluate(() => OMM.compxUi.connected()), true);
+  assert.equal(await page.locator('#sidebar .profile').count(), 4);
+  await page.evaluate(async () => {
+    window.atk = new OMM.MockCompxDevice({ vendorId: OMM.compx.VENDOR_ATK, productName: 'ATK X1 Pro Max', cid: 2, mid: 39 });
+    await OMM.connectCompx([atk]);
+  });
+  assert.equal(await page.locator('#sidebar .profile').count(), 4);
+  await page.locator('#sidebar .profile').nth(3).click();
+  await page.waitForFunction(() => !OMM.state.busy && OMM.compxUi.state.extras.profile === 3);
+  assert.equal(await page.evaluate(() => atk.profile), 3);
+  assert.match(await page.locator('#sidebar .selected').innerText(), /프로필 4/);
+  assert.equal(await page.evaluate(() => atk.writes.length), 0);
+  await page.screenshot({ path: path.join(root, '.local-tools/atk-profiles.png'), fullPage: true });
+  await page.evaluate(() => { OMM.compx.setScalar(OMM.compxUi.state.work, OMM.compx.FLASH.debounce, 8); OMM.ui.refresh(); });
+  await page.locator('#sidebar .profile').first().click();
+  await page.locator('#confirm button[value=cancel]').click();
+  assert.equal(await page.evaluate(() => atk.profile), 3);
+  assert.equal(await page.evaluate(() => OMM.compxUi.isDirty()), true);
+  await page.evaluate(() => { OMM.compxUi.revert(); atk._originalHandle = atk._handle; atk._handle = function(p, r) { if (p[0] !== 0x0f) this._originalHandle(p, r); }; });
+  await page.locator('#sidebar .profile').first().click();
+  await page.waitForFunction(() => !OMM.state.busy);
+  assert.equal(await page.evaluate(() => OMM.compxUi.state.extras.profile), 3);
+  assert.match(await page.locator('#toasts').textContent(), /프로필 전환을 확인하지 않았습니다/);
+  await page.evaluate(() => document.querySelector('#toasts').replaceChildren());
+
+  await page.evaluate(async () => {
+    const c = OMM.compx;
+    window.a9 = new OMM.MockCompxDevice({ vendorId: c.VENDOR_ATK, productName: 'ATK A9 Ultra', cid: 2, mid: 87 });
+    const model = c.modelFor(c.VENDOR_ATK, 2, 87);
+    for (const bank of a9.banks) [400,800,1600,3200].forEach((dpi, i) => c.setDpi(bank, i, dpi, model));
+    await OMM.connectCompx([a9]);
+  });
+  assert.equal(await page.locator('#editor h2').textContent(), 'ATK A9 Ultra');
+  assert.equal(await page.locator('#editor .notice').count(), 0);
+  await page.getByRole('button', { name: '성능', exact: true }).click();
+  assert.equal(await page.locator('#editor input[type=number]').first().isEnabled(), true);
+  assert.equal(await page.evaluate(() => a9.writes.length), 0);
+  assert.equal(await page.evaluate(() => OMM.compx.modelFor(OMM.compx.VENDOR_ATK, 1, 2).verified), false);
+  await page.screenshot({ path: path.join(root, '.local-tools/a9-confirmed-ui.png'), fullPage: true });
+  await page.evaluate(async () => {
+    window.mockMouse = makeMouse(0); mockMouse.profileNames = ['내 설정', '默认板载2', 'Profile 3'];
+    await OMM.connectMchose([mockMouse]);
+  });
+  assert.equal(await page.locator('#sidebar .profile-name').first().textContent(), '내 설정');
+  assert.equal(await page.locator('#sidebar .profile-name').nth(1).textContent(), '프로필 2');
+  await page.locator('.mchose-unlock input').check();
+  await page.locator('#sidebar .profile').nth(1).click();
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy && OMM.mchoseUi.state.original.activeProfile === 2);
+  assert.match(await page.locator('#sidebar .selected').innerText(), /프로필 2/);
+  await page.getByRole('button', { name: '성능', exact: true }).click();
+  await page.screenshot({ path: path.join(root, '.local-tools/gomm-mchose-performance.png'), fullPage: true });
+  await page.getByRole('button', { name: '버튼', exact: true }).click();
+  assert.equal(await page.locator('table.buttons select').count() > 0, true);
+  await page.getByRole('button', { name: '고급', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '기기 설정 다시 읽기' }).isVisible(), true);
+  assert.equal(await page.locator('#editor a[href*=NOTICE]').count(), 0);
+  await page.locator('#views [data-view=home]').click();
+  assert.equal(await page.locator('.device-photo').getAttribute('alt'), 'MCHOSE K7 Ultra 공식 제품 사진');
+  await page.locator('.device-photo').evaluate(img => img.decode());
+  assert.equal(await page.locator('.device-photo-credit').count(), 0);
+  const alpha = await page.locator('.device-photo').evaluate(img => {
+    const canvas = document.createElement('canvas'); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, 1, 1).data[3];
+  });
+  assert.equal(alpha, 0);
+  await page.screenshot({ path: path.join(root, '.local-tools/gomm-device-home.png'), fullPage: true });
+  await page.locator('.device-photo').dispatchEvent('error');
+  assert.equal(await page.locator('.device-art-wrap svg').count(), 1);
+  await page.setViewportSize({width: 390, height: 844});
+  await page.locator('#views [data-view=config]').click();
+  await page.getByRole('button', { name: '성능', exact: true }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.screenshot({ path: path.join(root, '.local-tools/gomm-mobile.png'), fullPage: true });
+  assert.deepEqual(errors, []);
+  console.log('Browser: ATK profiles, rejection and dirty cancel; MCHOSE UTF-8 names, tabs, staged save; official image/fallback, mobile and Logitech/VGN regressions passed.');
+} finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

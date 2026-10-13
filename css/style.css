@@ -118,7 +118,7 @@ input[type="range"]:disabled::-webkit-slider-thumb { border-color: var(--faint);
 }
 .brand-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
 .brand-text strong { font-size: 15px; letter-spacing: .02em; }
-.brand-text small { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.brand-text small { color: var(--muted); font-size: 11px; white-space: normal; }
 
 #views { display: flex; flex-direction: column; gap: 4px; }
 #views button, .rail-foot a {
@@ -295,6 +295,7 @@ ul.hint li { margin: 4px 0; }
 .tabs button.active { background: var(--surface-3); color: var(--text); }
 .panel { padding: 22px 0 4px; }
 
+.mchose-unlock { display: block; margin: 16px 0; white-space: normal; }
 .field { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .field > label { width: 120px; flex: none; color: var(--muted); }
 .field input[type="text"] { width: 260px; }
@@ -477,4 +478,18 @@ body:not([data-view="test"]) #tester { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation-duration: .01s !important; }
+}
+
+/* Shared profile cards and MCHOSE controls. */
+button.profile { width: 100%; text-align: left; white-space: normal; }
+.mchose-unlock { font-size: 13px; }
+.toggle-row { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border); cursor: pointer; }
+.toggle-row span { display: flex; flex-direction: column; gap: 4px; }
+.toggle-row small { color: var(--muted); }
+.device-art-wrap:has(.device-photo) { flex-direction: column; gap: 8px; height: auto; min-height: 210px; padding: 14px; }
+.device-photo { display: block; width: 100%; height: 210px; object-fit: contain; border-radius: 12px; }
+@media (max-width: 600px) {
+  .dpi-row { flex-wrap: wrap; }
+  .dpi-row input[type=range] { min-width: 100px; }
+  .tabs { display: flex; flex-wrap: wrap; }
 }

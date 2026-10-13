@@ -9,9 +9,11 @@
 
   // stageLimit: 연결했을 때 기기가 쓰고 있던 DPI 단계 수. 펌웨어가 몇 단계까지 받는지 알 수 없어 그보다 늘리지 않는다.
   // model: 기종별 선택지와 범위 (compx.js의 MODELS)
-  const cx = { dev: null, info: null, model: null, extras: null, orig: null, work: null, stageLimit: 0, tab: 'overview' };
+  // unlock: 실기기로 확인하지 못한 기종에서 사용자가 편집을 허용했는지
+  const cx = { dev: null, info: null, model: null, extras: null, orig: null, work: null, stageLimit: 0, tab: 'overview', unlock: false };
   const deviceName = () => cx.model.model || cx.dev.name;
   const maxRate = () => Math.min(cx.info.maxRate, cx.model.maxRate);
+  const canEdit = () => cx.model.verified !== false || cx.unlock;
 
   const connected = () => !!cx.work;
   const isDirty = () => connected() && C.diffRuns(cx.orig, cx.work).length > 0;
@@ -74,22 +76,23 @@
       extras: await dev.readExtras(),
     }));
     // 읽은 값이 이 구조로 말이 되는지 확인한다. 아니면 다른 구조의 기기이므로 건드리지 않는다.
-    const m = C.parse(image);
+    const m = C.parse(image, cx.model);
     const sane = C.RATES.includes(m.rate) && m.stageCount >= 1 && m.stageCount <= m.maxStages && m.currentStage < m.stageCount
-      && cx.model.lod.some(([v]) => v === m.lod) && image[C.FLASH.reportRate + 1] === C.check(image[C.FLASH.reportRate]);
+      && (!cx.model.lod || cx.model.lod.some(([v]) => v === m.lod)) && image[C.FLASH.reportRate + 1] === C.check(image[C.FLASH.reportRate]);
     if (!sane) throw new Error(`${dev.name}: 설정 데이터가 알려진 구조와 맞지 않아 지원하지 않는 기기입니다.`);
-    Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: m.stageCount, tab: 'overview' });
+    Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: m.stageCount, tab: 'overview', unlock: false });
   }
 
   async function disconnect() {
     if (cx.dev) await cx.dev.close().catch(() => {});
-    Object.assign(cx, { dev: null, info: null, model: null, extras: null, orig: null, work: null });
+    Object.assign(cx, { dev: null, info: null, model: null, extras: null, orig: null, work: null, unlock: false });
   }
 
   const ownsDevice = (device) => !!cx.dev && cx.dev.devices.includes(device);
 
   // 프로필마다 설정 이미지가 따로 있으므로, 바꾼 뒤 이미지를 다시 읽는다.
   async function switchProfile(index) {
+    if (!canEdit() || !cx.model.profiles || cx.extras.profile === null || OMM.state.busy) return;
     if (index === cx.extras.profile) return;
     if (isDirty()) {
       const ok = await ask('프로필 전환', ['저장하지 않은 변경 사항이 있습니다. 프로필을 바꾸면 이 변경 사항은 사라집니다.'], '버리고 전환');
@@ -99,7 +102,8 @@
       await cx.dev.setProfile(index);
       const image = await cx.dev.readFlash(0, C.IMAGE_LENGTH);
       const extras = await cx.dev.readExtras();
-      Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: C.parse(image).stageCount });
+      Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: C.parse(image, cx.model).stageCount });
+      if (extras.profile !== index) throw new Error('기기가 프로필 전환을 확인하지 않았습니다. 현재 상태를 다시 읽었습니다.');
     }));
     if (done) toast(`프로필 ${cx.extras.profile + 1}(으)로 전환했습니다.`, 'ok');
     OMM.ui.refresh();
@@ -111,10 +115,10 @@
       root.replaceChildren();
       return false;
     }
-    root.replaceChildren(...[...Array(C.PROFILE_COUNT).keys()].map((i) => h('div', {
-      class: 'profile' + (i === cx.extras.profile ? ' selected' : ''), role: 'button', tabindex: 0,
+    root.replaceChildren(...[...Array(C.PROFILE_COUNT).keys()].map((i) => h('button', {
+      type: 'button', disabled: !canEdit(), 'aria-pressed': String(i === cx.extras.profile),
+      class: 'profile' + (i === cx.extras.profile ? ' selected' : ''),
       onclick: () => switchProfile(i),
-      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchProfile(i); } },
     },
       h('div', { class: 'profile-main' },
         h('span', { class: 'profile-name' }, `프로필 ${i + 1}`),
@@ -124,7 +128,7 @@
 
   // 홈 카드와 상태 줄에 쓰는 요약 (기기에 저장된 값 기준)
   function summary() {
-    const m = C.parse(cx.orig);
+    const m = C.parse(cx.orig, cx.model);
     return {
       name: deviceName(),
       modeText: cx.info.wired ? '유선 연결' : '무선 연결',
@@ -141,8 +145,8 @@
 
   async function save() {
     const runs = C.diffRuns(cx.orig, cx.work);
-    if (!runs.length) return;
-    const m = C.parse(cx.work);
+    if (!runs.length || !canEdit()) return;
+    const m = C.parse(cx.work, cx.model);
     if (!m.keys.some((k) => k.cls === 1 && k.param === 0x0100)) {
       return toast('왼쪽 클릭이 어느 버튼에도 할당되어 있지 않습니다. 한 버튼에는 왼쪽 클릭을 남겨 두세요.', 'error');
     }
@@ -198,22 +202,26 @@
     };
     const rows = m.stages.slice(0, m.stageCount).map((dpi, i) => {
       const number = h('input', {
-        type: 'number', min: cx.model.dpiMin, max: cx.model.dpiMax, step: C.DPI_STEP, value: dpi,
-        onchange: (e) => { C.setDpi(cx.work, i, C.snapDpi(Number(e.target.value) || cx.model.dpiMin, cx.model)); edited(); },
+        type: 'number', min: cx.model.dpiMin, max: cx.model.dpiMax, step: cx.model.dpiStep || C.DPI_STEP, value: dpi,
+        onchange: (e) => { C.setDpi(cx.work, i, C.snapDpi(Number(e.target.value) || cx.model.dpiMin, cx.model), cx.model); edited(); },
       });
       return h('div', { class: 'dpi-row' },
         h('span', { class: 'dpi-idx' }, `${i + 1}단계`),
         h('input', {
-          type: 'range', min: cx.model.dpiMin, max: Math.max(cx.model.dpiMax, dpi), step: C.DPI_STEP, value: dpi,
-          oninput: (e) => { const v = C.snapDpi(Number(e.target.value), cx.model); C.setDpi(cx.work, i, v); number.value = v; edited(false); },
+          type: 'range', min: cx.model.dpiMin, max: Math.max(cx.model.dpiMax, dpi), step: cx.model.dpiStep || C.DPI_STEP, value: dpi,
+          oninput: (e) => { const v = C.snapDpi(Number(e.target.value), cx.model); C.setDpi(cx.work, i, v, cx.model); number.value = v; edited(false); },
         }),
         number,
         h('label', null, h('input', { type: 'radio', name: 'cx-stage', checked: i === m.currentStage, onchange: () => scalar(C.FLASH.currentStage)(i) }), ' 현재'));
     });
     return h('div', null,
       field('보고율', 'Hz', choice('보고율', withCurrent(rates, cx.work[C.FLASH.reportRate]), cx.work[C.FLASH.reportRate], false, scalar(C.FLASH.reportRate))),
-      field('리프트오프 거리', null, choice('리프트오프 거리', withCurrent(cx.model.lod, m.lod), m.lod, false, scalar(C.FLASH.lod))),
-      h('p', { class: 'hint field-desc' }, '마우스를 들어 올렸을 때 추적이 멈추는 높이입니다.'),
+      cx.model.lod
+        ? field('리프트오프 거리', null, choice('리프트오프 거리', withCurrent(cx.model.lod, m.lod), m.lod, false, scalar(C.FLASH.lod)))
+        : field('리프트오프 거리', null, choice('리프트오프 거리', [[m.lod, `저장 값 ${m.lod}`]], m.lod, true, () => {})),
+      h('p', { class: 'hint field-desc' }, cx.model.lod
+        ? '마우스를 들어 올렸을 때 추적이 멈추는 높이입니다.'
+        : '마우스를 들어 올렸을 때 추적이 멈추는 높이입니다. 이 기종은 저장 값이 뜻하는 거리가 확인되지 않아 바꿀 수 없습니다.'),
       h('h3', null, `DPI 단계 (${cx.model.dpiMin}~${cx.model.dpiMax.toLocaleString()})`),
       rows,
       h('div', { class: 'row-actions' },
@@ -294,17 +302,23 @@
   }
 
   function render(root) {
-    const m = C.parse(cx.work);
+    const m = C.parse(cx.work, cx.model);
     const tabs = [['overview', '개요'], ['performance', '성능'], ['buttons', '버튼'], cx.model.lighting && ['lighting', '조명'], ['advanced', '고급']].filter(Boolean);
     if (cx.tab === 'lighting' && !cx.model.lighting) cx.tab = 'overview';
     const body = cx.tab === 'performance' ? renderPerformance(m) : cx.tab === 'buttons' ? renderButtons(m)
       : cx.tab === 'lighting' ? renderLighting(m) : cx.tab === 'advanced' ? renderAdvanced(m) : renderOverview(m);
-    root.replaceChildren(
+    // 확인하지 못한 기종은 편집을 허용하기 전까지 값을 보여 주기만 한다.
+    if (!canEdit()) for (const el of body.querySelectorAll('input, select, button')) el.disabled = true;
+    const notice = cx.model.verified === false && h('div', { class: 'notice' }, h('label', null,
+      h('input', { type: 'checkbox', checked: cx.unlock, onchange: (e) => { cx.unlock = e.target.checked; if (!cx.unlock) cx.work.set(cx.orig); OMM.ui.refresh(); } }),
+      ` 이 기종(${deviceName()})은 실제 기기로 확인하지 못했고, ATK HUB의 기종표에 따라 해석했습니다. 화면의 DPI 단계·보고율·디바운스·버튼 값이 ATK HUB와 같은 것을 확인했고, 편집을 허용합니다. 값이 다르면 체크하지 말고 「진단 정보 내보내기」로 저장한 파일을 보내 주세요.`));
+    root.replaceChildren(...[
+      notice,
       h('div', { class: 'editor-head' }, h('h2', null, deviceName())),
       h('nav', { class: 'tabs' }, tabs.map(([id, label]) => h('button', {
         class: id === cx.tab ? 'active' : '', onclick: () => { cx.tab = id; render(root); },
       }, label))),
-      h('div', { class: 'panel' }, body));
+      h('div', { class: 'panel' }, body)].filter(Boolean));
   }
 
   OMM.compxUi = {

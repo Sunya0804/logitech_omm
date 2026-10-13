@@ -123,7 +123,7 @@
   }
 
   // 다른 프로토콜(compx-ui.js)로 연결된 기기가 있는지. 그 모듈은 이 파일보다 늦게 로드된다.
-  const compx = () => (OMM.compxUi && OMM.compxUi.connected() ? OMM.compxUi : null);
+  const externalUi = () => [OMM.mchoseUi, OMM.compxUi].find(ui => ui && ui.connected()) || null;
 
   async function connectCompx(devices) {
     await disconnect();
@@ -133,7 +133,16 @@
     if (ok) setView('config');
   }
 
+  async function connectMchose(devices) {
+    await disconnect();
+    const ok = await busy("MCHOSE 기기 읽는 중…", () => OMM.mchoseUi.connect(devices));
+    if (!ok) await OMM.mchoseUi.disconnect();
+    render();
+    if (ok) setView("config");
+  }
+
   async function disconnect() {
+    if (OMM.mchoseUi) await OMM.mchoseUi.disconnect();
     if (OMM.compxUi) await OMM.compxUi.disconnect();
     if (st.transport) await st.transport.close().catch(() => {});
     Object.assign(st, { transport: null, hidpp: null, op: null, desc: null, layout: null, profiles: [], selected: 0, unlock: false });
@@ -370,7 +379,7 @@
   async function importBackup(file) {
     try {
       const b = JSON.parse(await file.text());
-      if (b.type !== 'omm-web-backup' || !Array.isArray(b.profiles)) throw new Error('OMM 웹 백업 파일이 아닙니다.');
+      if (b.type !== 'omm-web-backup' || !Array.isArray(b.profiles)) throw new Error('GOMM 웹 백업 파일이 아닙니다.');
       if (b.profileFormatId !== st.desc.profileFormatId || b.sectorSize !== st.desc.sectorSize) {
         throw new Error(`이 기기와 호환되지 않는 백업입니다 (${b.device || '알 수 없는 기기'}).`);
       }
@@ -428,8 +437,9 @@
   // 기기 선택 창을 띄우고, 고른 기기의 제조사에 맞는 방식으로 연결한다.
   async function requestConnect() {
     try {
-      const picked = await navigator.hid.requestDevice({ filters: [...OMM.WebHidTransport.filters, ...OMM.compx.filters] });
+      const picked = await navigator.hid.requestDevice({ filters: [...OMM.WebHidTransport.filters, ...OMM.compx.filters, ...(OMM.mchoseUi?.filters || [])] });
       if (!picked.length) return;
+      if (OMM.mchoseUi?.filters.some(f => f.vendorId === picked[0].vendorId)) return await connectMchose(picked);
       if (OMM.compx.VENDOR_IDS.includes(picked[0].vendorId)) return await connectCompx(picked);
       const transport = new OMM.WebHidTransport(picked);
       if (!transport.out) throw new Error('선택한 기기에서 HID++ 인터페이스(리포트 0x11)를 찾지 못했습니다.');
@@ -441,7 +451,7 @@
 
   // 홈 카드와 상태 줄에 쓰는 요약: {name, modeText, dpi, rate, profileLabel, battery}
   function deviceSummary() {
-    if (compx()) return compx().summary();
+    if (externalUi()) return externalUi().summary();
     const cur = currentProfile();
     const sum = profileSummary(cur) || {};
     return {
@@ -474,10 +484,16 @@
   // 홈: 연결된 기기 카드와 "다른 기기 연결" 카드.
   function renderHome() {
     const root = $('#home-devices');
-    if (!st.desc && !compx()) return root.replaceChildren();
+    if (!st.desc && !externalUi()) return root.replaceChildren();
     const sum = deviceSummary();
     const art = h('div', { class: 'device-art-wrap' });
     art.innerHTML = MOUSE_ART;
+    const photo = OMM.deviceImage?.(sum.name);
+    if (photo) {
+      const img = h('img', { src: photo.image, alt: `${sum.name} 공식 제품 사진`, class: 'device-photo',
+        referrerpolicy: 'no-referrer', onerror: () => { art.innerHTML = MOUSE_ART; } });
+      art.replaceChildren(img);
+    }
     root.replaceChildren(
       h('article', { class: 'device-card' },
         h('div', { class: 'device-card-head' },
@@ -493,7 +509,7 @@
   }
 
   function render() {
-    const connected = !!st.desc || !!compx();
+    const connected = !!st.desc || !!externalUi();
     $('#home-hero').hidden = connected;
     $('#home-devices').hidden = !connected;
     $('#config-empty').hidden = connected;
@@ -505,10 +521,10 @@
     if (!connected) return;
     // 백업·진단은 Logitech 온보드 프로필 전용이다.
     $('#sidebar').hidden = false;
-    for (const id of ['#btn-export', '#btn-import']) $(id).hidden = !!compx();
-    if (compx()) {
-      $('#sidebar').hidden = !compx().renderProfiles($('#sidebar'));
-      compx().render($('#editor'));
+    for (const id of ['#btn-export', '#btn-import']) $(id).hidden = !!externalUi();
+    if (externalUi()) {
+      $('#sidebar').hidden = !externalUi().renderProfiles($('#sidebar'));
+      externalUi().render($('#editor'));
       renderActionBar();
       return;
     }
@@ -519,7 +535,7 @@
 
   function renderDeviceBar() {
     const bar = $('#device');
-    if (compx()) return bar.replaceChildren(h('strong', null, deviceSummary().name), ...statusChips().filter(Boolean));
+    if (externalUi()) return bar.replaceChildren(h('strong', null, deviceSummary().name), ...statusChips().filter(Boolean));
     if (!st.desc) return bar.replaceChildren();
     bar.replaceChildren(
       h('strong', null, st.name),
@@ -556,10 +572,10 @@
   }
 
   function renderActionBar() {
-    if (compx()) {
-      const dirty = compx().isDirty();
+    if (externalUi()) {
+      const dirty = externalUi().isDirty();
       $('#dirty-count').textContent = dirty ? '저장되지 않은 변경이 있습니다' : '변경 사항 없음';
-      $('#btn-save').disabled = !dirty;
+      $('#btn-save').disabled = !dirty || (externalUi().canEdit && !externalUi().canEdit());
       $('#btn-revert').disabled = !dirty;
       return;
     }
@@ -885,10 +901,10 @@
     for (const btn of document.querySelectorAll('#views button')) btn.addEventListener('click', () => setView(btn.dataset.view));
     setView(st.view);
     $('#btn-disconnect').addEventListener('click', async () => { await disconnect(); render(); });
-    $('#btn-save').addEventListener('click', () => (compx() ? compx().save() : save()));
-    $('#btn-revert').addEventListener('click', () => (compx() ? compx().revert() : revert()));
+    $('#btn-save').addEventListener('click', () => (externalUi() ? externalUi().save() : save()));
+    $('#btn-revert').addEventListener('click', () => (externalUi() ? externalUi().revert() : revert()));
     $('#btn-export').addEventListener('click', exportBackup);
-    $('#btn-diagnostics').addEventListener('click', () => (compx() ? compx().exportDiagnostics() : exportDiagnostics()));
+    $('#btn-diagnostics').addEventListener('click', () => (externalUi() ? externalUi().exportDiagnostics() : exportDiagnostics()));
     $('#btn-import').addEventListener('click', () => $('#import-file').click());
     $('#import-file').addEventListener('change', (e) => {
       if (e.target.files[0]) importBackup(e.target.files[0]);
@@ -897,7 +913,8 @@
     if (supported) {
       navigator.hid.addEventListener('disconnect', async (e) => {
         const ours = (st.transport && st.transport.devices && st.transport.devices.includes(e.device))
-          || (OMM.compxUi && OMM.compxUi.ownsDevice(e.device));
+          || (OMM.compxUi && OMM.compxUi.ownsDevice(e.device))
+          || (OMM.mchoseUi && OMM.mchoseUi.ownsDevice(e.device));
         if (!ours) return;
         await disconnect();
         render();
@@ -905,7 +922,7 @@
       });
     }
     window.addEventListener('beforeunload', (e) => {
-      if (st.profiles.some(isDirty) || (compx() && compx().isDirty())) e.preventDefault();
+      if (st.profiles.some(isDirty) || (externalUi() && externalUi().isDirty())) e.preventDefault();
     });
     render();
   }
@@ -915,6 +932,7 @@
   OMM.setView = setView;
   OMM.ui = { h, choice, toast, busy, ask, download, refresh: render, refreshActions: renderActionBar };
   OMM.connectCompx = connectCompx;
+  OMM.connectMchose = connectMchose;
   OMM.state = st;
   OMM.connect = connect;
   init();

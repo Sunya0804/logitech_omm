@@ -9,15 +9,15 @@
 
   const VARIANTS = {
     classic: {
-      name: 'OMM Demo Mouse', formatId: 2, buttonCount: 11,
+      name: 'GOMM Demo Mouse', formatId: 2, buttonCount: 11,
       features: [0x0000, 0x0005, 0x8100, 0x2201, 0x1004], // 배열 인덱스 = 기능 인덱스
     },
     extended: {
-      name: 'OMM Demo Mouse X', formatId: 7, buttonCount: 5,
+      name: 'GOMM Demo Mouse X', formatId: 7, buttonCount: 5,
       features: [0x0000, 0x0005, 0x8100, 0x2202, 0x1004, 0x8061],
     },
     analog: {
-      name: 'OMM Demo Mouse S', formatId: 8, buttonCount: 5,
+      name: 'GOMM Demo Mouse S', formatId: 8, buttonCount: 5,
       features: [0x0000, 0x0005, 0x8100, 0x2202, 0x1004, 0x8061, 0x1b0c],
     },
   };
