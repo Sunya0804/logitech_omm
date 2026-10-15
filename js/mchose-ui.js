@@ -1,4 +1,4 @@
-import { filters, catalog, createClient, scalarSetters, editableSnapshot, changes, saveChanges, knownStatus } from './mchose.js';
+import { filters, catalog, createClient, changes, saveChanges, knownStatus } from './mchose.js';
 
 const OMM = window.OMM;
 const { h, choice, toast, busy, ask, download } = OMM.ui;
@@ -50,7 +50,7 @@ async function exportDiagnostics() {
     const d = state.client.device;
     download({ type: 'omm-web-mchose-diagnostics', version: 1, exportedAt: new Date().toISOString(),
       vendorId: d.vendorId, productId: d.productId, productName: d.productName,
-      collections: d.collections, status, source: 'OpenMouse 80ba207332b02581d870697d74fa5d5b18d76033',
+      collections: d.collections, family: state.client.family, status,
     }, 'diagnostics', status.name);
   });
   if (done) toast('읽기 전용 진단 정보를 저장했습니다.', 'ok');
@@ -154,7 +154,7 @@ function buttons(s) {
       h('td', { class: 'btn-idx' }, labels[button] || button), h('td', { class: 'btn-desc' }, labels[action] || action),
       h('td', null, h('select', { 'aria-label': labels[button] || button, disabled: !canEdit() || button === 'Left', onchange: e => {
         state.work.buttonMappings[button] = e.target.value; changed();
-      } }, ...[...new Set([action, ...s.buttonOptions])].map(value => h('option', { value, selected: value === action }, labels[value] || value)))))))),
+      } }, ...[...new Set([action, ...s.buttonOptions.filter(o => !(s.family === 'V3' && button === 'DPI' && o === '기본값'))])].map(value => h('option', { value, selected: value === action }, labels[value] || value)))))))),
     h('p', { class: 'hint' }, '왼쪽 클릭은 유지됩니다. 기존 매크로는 다른 동작을 선택하지 않으면 유지됩니다.'));
   return h('div', null, ...nodes);
 }

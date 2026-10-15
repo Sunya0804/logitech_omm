@@ -68,11 +68,12 @@ ATK(제조사 ID `0x373b`)는 VGN과 같은 프로토콜을 쓰지만 센서에 
 
 ## MCHOSE 마우스
 
-OpenMouse의 A5 Gen1·V2·V3 드라이버와 M HUB의 추가 기종 데이터를 사용합니다.
+M HUB(제조사 웹 드라이버)가 쓰는 세 가지 통신 방식(A5 1세대·V2·V3)을 이 프로젝트에서 직접 구현했습니다(js/mchose.js).
+명령 번호와 바이트 위치는 M HUB의 동작과 [OpenMouse](https://github.com/OpenMouse-Project/mouse-protocol)가 공개한 관찰 기록을 사실 정보로 참고했습니다(코드는 가져오지 않음).
 **40개 기종·연결 변형 항목**을 등록했습니다. 회사의 모든 과거·미래 제품이 검증됐다는 의미는 아닙니다.
 기종표와 검증 범위는 [MCHOSE 지원 문서](docs/mchose-support.md)를 참고하세요.
 
-- DPI 단계 값·활성 단계, 보고율, LOD, 디바운스, 절전, 모션 싱크·각도 스냅·리플 컨트롤, 성능 모드, 센서 각도, 버튼 할당을 기종별로 제공합니다.
+- DPI 단계 값·활성 단계, 보고율, 리프트오프 거리(V2·A5), 디바운스, 절전, 모션 싱크·각도 스냅·리플 컨트롤, 성능 모드, 센서 각도, 버튼 할당을 기종별로 제공합니다.
 - 기존 프로필 전환은 확인 후 즉시 적용합니다. 그 외 편집은 「기기에 저장」 전까지 기기에 쓰지 않습니다.
 - 연결할 때는 읽기만 합니다. 표시값을 M HUB와 대조한 뒤 편집을 허용하는 체크박스를 켭니다.
 - 저장 전 외부 변경 여부를 확인하고 저장 후 값을 다시 읽어 검증합니다. 실패하면 추가 쓰기를 막고 다시 읽기를 요구합니다.
@@ -80,14 +81,12 @@ OpenMouse의 A5 Gen1·V2·V3 드라이버와 M HUB의 추가 기종 데이터를
 - K7 Ultra(3837:1001 → 본체 4150)와 A7 V2 Ultra+(3837:100B → 본체 4021)는 이 PC에서 설정 읽기를 확인했습니다. **실기기 저장은 수행하지 않았습니다.**
 - 지원하지 않는 구조·미확인 기종은 읽기 전용으로 두고 진단 파일을 내보낼 수 있습니다. 세대가 다른 프로토콜을 무작정 시도하지 않습니다.
 
-통신 소스는 `vendor/openmouse/`에 포함돼 있어 실행 중 외부 서버에서 드라이버를 가져오지 않습니다.
+실행 중 외부 서버에서 드라이버를 가져오지 않습니다.
 
 개발 검증(Node 24 이상):
 
 ```powershell
-node tools/vendor-mchose.mjs
 node --test tests/mchose.test.mjs
-node --test vendor/openmouse/mchose/*.test.js
 # Playwright Core와 Chrome 경로를 지정한 가상 기기 UI 테스트
 node tests/browser.mjs <playwright-core/index.mjs> <chrome.exe>
 ```

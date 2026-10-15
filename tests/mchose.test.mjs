@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { CapturedMouse } from './mchose-fixture.mjs';
-import { catalog, createClient, saveChanges, changes, knownStatus } from '../js/mchose.js';
-import { MCHOSE_V3_PRODUCT_IDS, mchoseDecodeProfileName } from '../vendor/openmouse/mchose/index.js';
+import { catalog, createClient, saveChanges, changes, knownStatus, profileNameFrom } from '../js/mchose.js';
+import { V3_PIDS } from '../js/mchose-models.js';
 const captures = JSON.parse(fs.readFileSync(new URL('./fixtures/mchose-hardware.json', import.meta.url)));
 const originalTimeout = globalThis.setTimeout;
 globalThis.setTimeout = (fn, ms, ...args) => originalTimeout(fn, Math.min(ms, 1), ...args);
@@ -56,9 +56,9 @@ test('left button cannot be staged for reassignment', () => {
   assert.throws(() => changes(before, after), /왼쪽/);
 });
 test('V3 USB IDs route to V3; firmware, dock and unrelated vendor are rejected', () => {
-  for (const productId of MCHOSE_V3_PRODUCT_IDS) {
+  for (const productId of V3_PIDS) {
     const dev = new CapturedMouse(captures[0]); dev.productId = productId;
-    assert.equal(createClient([dev]).constructor.name, 'MchoseV3HidClient');
+    assert.equal(createClient([dev]).family, 'V3');
   }
   for (const mutate of [d => { d.productId = 0x1012; }, d => { d.vendorId = 0x046d; }, d => { d.collections[0].usagePage = 0xff0b; }]) {
     const dev = new CapturedMouse(captures[0]); mutate(dev);
@@ -70,11 +70,11 @@ test('V3 USB IDs route to V3; firmware, dock and unrelated vendor are rejected',
 test('profile names decode UTF-8 and reject invalid data', () => {
   for (const text of ['내 설정', '默认板载2', 'Config 1', 'FPS 🎯']) {
     const payload = Uint8Array.from([0, ...new TextEncoder().encode(text), 0, 255]);
-    assert.equal(mchoseDecodeProfileName(payload), text);
+    assert.equal(profileNameFrom(payload), text);
   }
-  assert.equal(mchoseDecodeProfileName(Uint8Array.from([0, 0xff, 0])), null);
-  assert.equal(mchoseDecodeProfileName(Uint8Array.from([0, 0])), null);
-  assert.equal(mchoseDecodeProfileName(Uint8Array.from([0, 65, 1, 0])), null);
+  assert.equal(profileNameFrom(Uint8Array.from([0, 0xff, 0])), null);
+  assert.equal(profileNameFrom(Uint8Array.from([0, 0])), null);
+  assert.equal(profileNameFrom(Uint8Array.from([0, 65, 1, 0])), null);
 });
 
 test('a missing profile name preserves names in the other slots', async () => {

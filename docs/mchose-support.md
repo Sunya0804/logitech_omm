@@ -2,7 +2,8 @@
 
 ## 자료 출처
 
-- OpenMouse mouse-protocol: <https://github.com/OpenMouse-Project/mouse-protocol/tree/80ba207332b02581d870697d74fa5d5b18d76033/src/mchose>
+- OpenMouse mouse-protocol의 MCHOSE 관찰 기록: <https://github.com/OpenMouse-Project/mouse-protocol/tree/80ba207332b02581d870697d74fa5d5b18d76033/src/mchose>
+  - 명령 번호, 바이트 위치, 기종 식별값 같은 사실 정보만 참고했습니다. 코드와 문서는 포함하지 않으며, 드라이버(`js/mchose.js`)는 이 프로젝트에서 새로 작성했습니다.
 - 제조사 M HUB: <https://www.mchose.com.cn/assets/purify.es-DfJclCKp.js>
   - 다운로드 SHA-256: `ec61056f775349abd7e650466836c714d026d36ef314ef6b70b0de5d563e70b7`
   - `km` 기종표의 이름, PID, 링크별 보고율 상한, DPI 상한, LOD 선택지 데이터만 옮겼습니다. 제조사 실행 코드를 포함하지 않습니다.
@@ -13,16 +14,16 @@
 
 | 프로토콜 | 기종 | 근거 |
 | --- | --- | --- |
-| A5 Gen1 | A5 Pro Max 유선·1K 수신기·4K 수신기 | OpenMouse의 3개 USB 항목 |
-| V2 | A7 V2 Pro, Pro+, Ultra, Ultra+ | OpenMouse |
+| A5 Gen1 | A5 Pro Max 유선·1K 수신기·4K 수신기 | OpenMouse 관찰 기록의 USB 항목 |
+| V2 | A7 V2 Pro, Pro+, Ultra, Ultra+ | M HUB 기종표(OpenMouse 정리) |
 | V2 | M7, M7 1K, M7 Pro, M7 Ultra | M HUB 기종표 |
 | V2 | L7, Pro, Pro+, Ultra, Ultra+ | M HUB 기종표 |
 | V2 | A7, A7 Pro, A7 Ultra, A7X Ultra, A7 Ultra(RE) | M HUB 기종표 |
 | V2 | K7 Ultra, AX5 V2, A5 V2 Ultra, G3 Ultra 8K/4K | M HUB 기종표 |
-| V3 | A5 V3 Pro, Ultra+, Ultra+ (3955) | OpenMouse |
-| V3 | K7 V2 Pro+, Ultra+ | OpenMouse |
-| V3 | A7 V3, Pro, Pro+, Ultra+ | OpenMouse |
-| V3 | K5 Pro, K5 Ultra, R7 Ultra, V7, G3 V3 | OpenMouse |
+| V3 | A5 V3 Pro, Ultra+, Ultra+ (3955) | M HUB 기종표(OpenMouse 정리) |
+| V3 | K7 V2 Pro+, Ultra+ | M HUB 기종표(OpenMouse 정리) |
+| V3 | A7 V3, Pro, Pro+, Ultra+ | M HUB 기종표(OpenMouse 정리) |
+| V3 | K5 Pro, K5 Ultra, R7 Ultra, V7, G3 V3 | M HUB 기종표(OpenMouse 정리) |
 
 총 40개 기종·연결 변형 항목입니다. 기종표 등록과 실기기 검증은 다릅니다.
 위 표에 없는 G7·일부 초기 G3 등 다른 프로토콜 제품은 편집 지원을 주장하지 않습니다.
@@ -49,7 +50,7 @@ G3 Ultra 8K/4K는 같은 USB ID로 유선·수신기를 구분할 수 없어 목
 
 ## GOMM 통합 정책
 
-- 두 원본 드라이버의 바이너리 세대와 A5 Gen1을 구분합니다. MagDock와 ff0b 업데이트 채널은 제외합니다.
+- V2·V3 세대와 A5 Gen1을 구분합니다. MagDock와 ff0b 업데이트 채널은 제외합니다.
 - V2는 프로필 번호·활성 DPI 단계·단계 수·DPI 범위·보고율·디바운스를 검증합니다.
 - V2의 미사용 DPI 슬롯은 편집 화면에서 제외합니다. 단계 개수 변경은 현재 UI에서 제공하지 않습니다.
 - 알려진 기종이어도 사용자가 표시값을 대조해야 편집됩니다. 이 프로젝트의 실기기 쓰기 검증은 아직 없습니다.
@@ -57,21 +58,16 @@ G3 Ultra 8K/4K는 같은 USB ID로 유선·수신기를 구분할 수 없어 목
 - 저장 직전에 기기 값을 다시 읽고 외부 변경 시 쓰기 전에 중단합니다.
 - 저장 후 요청한 필드를 다시 대조합니다. 오류 뒤에는 다시 읽기 전까지 추가 쓰기를 막습니다.
 - 전체 저장은 원자적이지 않습니다. 일부 명령 성공 뒤 실패할 수 있으며 자동 롤백하지 않습니다.
-- 기존 버튼·매크로 바이트는 드라이버가 읽기-수정-쓰기로 보존합니다. 왼쪽 버튼은 UI에서 재할당하지 않습니다.
+- 같은 블록에 들어가는 변경은 한 번에 모아 씁니다. 바꾸지 않는 바이트(버튼·매크로 포함)는 방금 읽은 값을 그대로 돌려보냅니다. 왼쪽 버튼은 UI에서 재할당하지 않습니다.
 
 ## 검증
 
 - 두 실기기 캡처를 WebHID 가상 기기에 재생해 읽기와 staged save, 변경하지 않은 바이트 보존을 검사합니다.
-- OpenMouse의 A5 Gen1/V2/V3 코덱·버튼 테스트를 포함해 총 103개 테스트를 통과했습니다.
+- OpenMouse 기반 이전 구현과 새 구현을 같은 가상 기기(V2 무작위 설정 150개, V3 무작위 기기 200개, A5 60개)에 연결해, 읽은 값과 기록 바이트가 같은지 대조했습니다.
 - 외부 프로필 변경, 기기 쓰기 거부, 알 수 없는 모델, 손상된 활성 단계, 왼쪽 버튼 보호, 세대별 라우팅을 검사합니다.
 - 헤드리스 Chrome에서 읽기 전용 초기 상태 → 편집 허용 → 변경 → 확인 → 가상 저장을 검사합니다.
 - 같은 브라우저 세션에서 MCHOSE → Logitech 가상 기기 → VGN 가상 기기로 전환해 기존 연결 화면을 검사합니다.
 - 가상 기기 결과는 실제 쓰기 성공의 근거가 아닙니다.
-
-## 브라우저 파일 재생성
-
-원본을 보관한 `vendor/openmouse/source`와 `tools/vendor-mchose.mjs`로 브라우저 파일을 재생성합니다.
-GOMM에서 추가한 변경은 정확한 이름 우선 식별, 기종표 확장, 읽기 검증, 편집/저장 UI입니다.
 
 ## 프로필 이름과 화면 (2026-10-14)
 
