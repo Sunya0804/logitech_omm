@@ -49,7 +49,7 @@ export function setLang(next) {
   if (next === lang || !LANGS.some(([id]) => id === next)) return;
   lang = next;
   try { localStorage.setItem(STORAGE_KEY, next); } catch { /* 저장하지 못해도 이번 화면에는 적용된다 */ }
-  translateDom();
+  if (globalThis.document) translateDom(); // Node 시험에서는 화면이 없다
   for (const fn of listeners) fn(lang);
 }
 
