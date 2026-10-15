@@ -11,6 +11,7 @@
 // 같은 블록에 들어가는 변경은 한 번에 모아서 쓴다. 쓰기 결과의 확인은 saveChanges()가 다시 읽어서 한다.
 import { MODELS, V2_BLUETOOTH, V3_LINKS, V3_PIDS, DOCK_PID } from './mchose-models.js';
 import * as act from './mchose-actions.js';
+import { t as tr } from './i18n.js';
 
 const MCHOSE = 0x3837;
 const MODES = ['Performance', 'eSports', 'Ultra'];
@@ -25,7 +26,7 @@ const flat = list => (list || []).flatMap(c => [c, ...flat(c.children)]);
 const rateLadder = max => [125, 500, 1000, 2000, 4000, 8000].filter(r => r <= max);
 function need(ok, message) { if (!ok) throw new Error(message); }
 function checkDpi(dpi, min, max) {
-  need(isInt(dpi, min, max) && dpi % 50 === 0, `DPI는 ${min}~${max.toLocaleString()} 사이의 50 단위여야 합니다.`);
+  need(isInt(dpi, min, max) && dpi % 50 === 0, tr('DPI는 {min}~{max} 사이의 50 단위여야 합니다.', { min, max: max.toLocaleString() }));
 }
 
 // 여러 요청이 기기에 동시에 나가지 않게 한 줄로 세운다.
@@ -135,7 +136,7 @@ class V2Driver extends Driver {
   }
   async freshConfig() {
     const c = await this.readConfig();
-    need(c, '마우스가 설정을 돌려주지 않았습니다.');
+    need(c, tr('마우스가 설정을 돌려주지 않았습니다.'));
     return c;
   }
 
@@ -209,10 +210,10 @@ class V2Driver extends Driver {
       angleTuning: c ? signed(c[49]) : null,
       buttonMappings: c ? await this.buttonLabels(c) : undefined,
       buttonOptions: c ? act.OPTIONS : undefined,
-      firmware: ver ? [`수신기 ${ver}`] : [],
+      firmware: ver ? [tr('수신기 {version}', { version: ver })] : [],
       ui: {
         settingsReady: ready,
-        statusNote: link && !link[5] ? '수신기는 연결됐지만 마우스가 응답하지 않습니다. 마우스를 움직여 깨운 뒤 다시 읽으세요.' : null,
+        statusNote: link && !link[5] ? tr('수신기는 연결됐지만 마우스가 응답하지 않습니다. 마우스를 움직여 깨운 뒤 다시 읽으세요.') : null,
         dpiStageEditor: { minDpi: 50, maxDpi: model?.dpiMax ?? 26000, stepDpi: 50 },
       },
     };
@@ -224,14 +225,14 @@ class V2Driver extends Driver {
     if (SENSOR_KEYS.some(k => touched.has(k))) await this.writeSensor(want, touched);
     if (touched.has('sleepTimeout')) {
       const minutes = Math.round(want.sleepTimeout / 60);
-      need(isInt(minutes, 0, 255), '절전 시간이 범위를 벗어났습니다.');
+      need(isInt(minutes, 0, 255), tr('절전 시간이 범위를 벗어났습니다.'));
       // 절전은 반영이 느려 1.5초 기다린다.
       await this.tell(SHORT, [0x0a, minutes ? 1 : 0, minutes], 1500);
     }
     for (const key of keys.filter(k => k.startsWith('buttonMappings.'))) {
       const button = key.slice('buttonMappings.'.length), index = act.V2_BUTTONS.indexOf(button);
       const code = act.v2Encode(want.buttonMappings[button]);
-      need(index >= 0 && code, `${button} 버튼에 쓸 수 없는 동작입니다.`);
+      need(index >= 0 && code, tr('{button} 버튼에 쓸 수 없는 동작입니다.', { button }));
       const [type, value] = code;
       await this.tell(LONG, [0x52, index, 0, type, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff], 900);
     }
@@ -240,9 +241,9 @@ class V2Driver extends Driver {
   async writeConfig(want) {
     const c = Uint8Array.from(await this.freshConfig());
     const rate = this.rates().indexOf(want.pollingRateHz);
-    need(rate >= 0, `이 연결에서는 ${want.pollingRateHz} Hz를 쓸 수 없습니다.`);
-    need(isInt(want.activeDpiStage, 0, c[16] - 1), '현재 DPI 단계가 범위를 벗어났습니다.');
-    need(isInt(want.debounceMs, 0, 20), '디바운스는 0~20 ms입니다.');
+    need(rate >= 0, tr('이 연결에서는 {rate} Hz를 쓸 수 없습니다.', { rate: want.pollingRateHz }));
+    need(isInt(want.activeDpiStage, 0, c[16] - 1), tr('현재 DPI 단계가 범위를 벗어났습니다.'));
+    need(isInt(want.debounceMs, 0, 20), tr('디바운스는 0~20 ms입니다.'));
     c[this.linkByte] = (rate << 4) | want.activeDpiStage;
     want.dpiStages.forEach((dpi, i) => {
       checkDpi(dpi, 50, this.model?.dpiMax ?? 26000);
@@ -258,12 +259,12 @@ class V2Driver extends Driver {
   // 이 명령은 반영이 가장 느려서, 너무 빨리 읽으면 이전 값이 돌아온다. 2초 기다리고 맞을 때까지 세 번까지 다시 보낸다.
   async writeSensor(want, touched) {
     const lod = this.liftOffs().indexOf(want.liftOffDistance);
-    need(isInt(lod, 0, 3), '이 기종에서 쓸 수 없는 리프트오프 거리입니다.');
+    need(isInt(lod, 0, 3), tr('이 기종에서 쓸 수 없는 리프트오프 거리입니다.'));
     const toggle = key => touched.has(key) ? (want[key] ? 1 : 2) : 0;
     const mode = touched.has('powerMode') ? MODES.indexOf(want.powerMode) + 1 : 0;
-    need(!touched.has('powerMode') || mode > 0, '알 수 없는 성능 모드입니다.');
+    need(!touched.has('powerMode') || mode > 0, tr('알 수 없는 성능 모드입니다.'));
     const angle = touched.has('angleTuning') ? want.angleTuning : null;
-    need(angle === null || isInt(angle, -30, 30), '센서 각도는 -30~30°입니다.');
+    need(angle === null || isInt(angle, -30, 30), tr('센서 각도는 -30~30°입니다.'));
     const tokens = [0x42, lod, toggle('rippleControl'), toggle('angleSnapping'), toggle('motionSync'), 0, 0, mode,
       angle === null ? 0 : 1, angle === null ? 0 : angle & 0xff];
 
@@ -281,7 +282,7 @@ class V2Driver extends Driver {
   }
 
   async setProfile(number) {
-    need(isInt(number, 1, 3), '프로필은 1~3입니다.');
+    need(isInt(number, 1, 3), tr('프로필은 1~3입니다.'));
     await this.tell(SHORT, [0x58, number - 1], 600);
   }
 }
@@ -340,7 +341,7 @@ class V3Driver extends Driver {
   get linkByte() { return this.wired ? 1 : 2; }
 
   frame(command, data) {
-    need(8 + data.length <= 63, '명령 데이터가 너무 깁니다.');
+    need(8 + data.length <= 63, tr('명령 데이터가 너무 깁니다.'));
     const b = new Uint8Array(63);
     b.set([1, 1, data.length, command & 0xff, command >> 8, 0, 0]);
     b.set(data, 7);
@@ -420,8 +421,8 @@ class V3Driver extends Driver {
     const sensor = s?.[5] ?? 0;
     const lodText = m && lod !== null && m.lod[lod] !== undefined ? `${m.lod[lod]} mm` : null;
     const note = !s
-      ? (this.asleep ? '수신기는 연결됐지만 마우스가 응답하지 않습니다. 마우스를 깨우거나 전원을 확인하세요.' : '마우스가 응답하지 않았습니다. 기종과 연결 방식을 알려 주세요.')
-      : `${lodText ? `리프트오프 ${lodText}. ` : ''}이 세대의 설정 쓰기는 M HUB와 같은 명령을 쓰지만 실기기로 확인하지 않았습니다.`;
+      ? (this.asleep ? tr('수신기는 연결됐지만 마우스가 응답하지 않습니다. 마우스를 깨우거나 전원을 확인하세요.') : tr('마우스가 응답하지 않았습니다. 기종과 연결 방식을 알려 주세요.'))
+      : (lodText ? tr('리프트오프 {value}.', { value: lodText }) + ' ' : '') + tr('이 세대의 설정 쓰기는 M HUB와 같은 명령을 쓰지만 실기기로 확인하지 않았습니다.');
 
     return {
       brand: 'MCHOSE', family: 'V3',
@@ -448,7 +449,7 @@ class V3Driver extends Driver {
       powerModes: s ? MODES : undefined,
       buttonMappings: buttons ? Object.fromEntries(act.V3_BUTTONS.map(b => [b, act.v3Describe(b, buttons[b])])) : undefined,
       buttonOptions: buttons ? act.OPTIONS : undefined,
-      firmware: ver ? [`펌웨어 ${ver}`] : [],
+      firmware: ver ? [tr('펌웨어 {version}', { version: ver })] : [],
       ui: {
         settingsReady: !!s,
         statusNote: note,
@@ -460,17 +461,17 @@ class V3Driver extends Driver {
   async freshSettings() {
     this.silent = false;
     const s = await this.settings();
-    need(s, '마우스가 설정을 돌려주지 않았습니다.');
+    need(s, tr('마우스가 설정을 돌려주지 않았습니다.'));
     return Array.from(s);
   }
 
   async apply(keys, want) {
     const touched = new Set(keys.map(k => k.split('.')[0]));
-    need(!touched.has('liftOffDistance'), '이 기종의 리프트오프는 바꿀 수 없습니다.');
+    need(!touched.has('liftOffDistance'), tr('이 기종의 리프트오프는 바꿀 수 없습니다.'));
     // 다른 블록을 먼저 쓴 뒤 버튼에서 막혀 일부만 저장되지 않도록, 쓰기 전에 버튼 동작부터 모두 확인한다.
     for (const key of keys.filter(k => k.startsWith('buttonMappings.'))) {
       const button = key.slice('buttonMappings.'.length);
-      need(act.v3Encode(button, want.buttonMappings[button]), `${button} 버튼에는 「${want.buttonMappings[button]}」을(를) 쓸 수 없습니다.`);
+      need(act.v3Encode(button, want.buttonMappings[button]), tr('{button} 버튼에는 「{action}」을(를) 쓸 수 없습니다.', { button, action: tr(want.buttonMappings[button]) }));
     }
     if (V3_SETTINGS_KEYS.some(k => touched.has(k))) await this.writeSettings(want, touched);
     if (touched.has('dpiStages') || touched.has('activeDpiStage')) await this.writeDpi(want);
@@ -482,28 +483,28 @@ class V3Driver extends Driver {
     const s = await this.freshSettings();
     if (touched.has('pollingRateHz')) {
       const choice = this.rates().indexOf(want.pollingRateHz);
-      need(choice >= 0, `이 기종은 ${want.pollingRateHz} Hz를 지원하지 않습니다.`);
+      need(choice >= 0, tr('이 기종은 {rate} Hz를 지원하지 않습니다.', { rate: want.pollingRateHz }));
       s[this.linkByte] = (toStored(choice) << 4) | (s[this.linkByte] & 15);
     }
     if (touched.has('sleepTimeout')) {
       const minutes = Math.round(want.sleepTimeout / 60);
-      need(isInt(minutes, 0, 60), '절전 시간은 0~60분입니다.');
+      need(isInt(minutes, 0, 60), tr('절전 시간은 0~60분입니다.'));
       // 0분(끄기)일 때는 절전 모드 비트도 함께 켜 둬야 한다.
       s[3] = minutes;
       s[4] = (s[4] & ~1) | (minutes === 0 ? 1 : 0);
     }
     if (touched.has('debounceMs')) {
-      need(isInt(want.debounceMs, 0, 20), '디바운스는 0~20 ms입니다.');
+      need(isInt(want.debounceMs, 0, 20), tr('디바운스는 0~20 ms입니다.'));
       // 왼쪽·오른쪽 버튼 값을 따로 저장하지만 화면에는 하나만 있으므로 둘을 같이 바꾼다.
       s[7] = s[8] = want.debounceMs;
     }
     if (touched.has('angleTuning')) {
-      need(isInt(want.angleTuning, -30, 30), '센서 각도는 -30~30°입니다.');
+      need(isInt(want.angleTuning, -30, 30), tr('센서 각도는 -30~30°입니다.'));
       s[6] = want.angleTuning & 0xff;
     }
     if (touched.has('powerMode')) {
       const mode = MODES.indexOf(want.powerMode);
-      need(mode >= 0, '알 수 없는 성능 모드입니다.');
+      need(mode >= 0, tr('알 수 없는 성능 모드입니다.'));
       s[5] = (s[5] & ~3) | mode;
     }
     for (const [key, bit] of Object.entries(V3_SENSOR_BIT)) {
@@ -515,14 +516,14 @@ class V3Driver extends Driver {
   async writeDpi(want) {
     const s = await this.freshSettings();
     const t = await this.dpiTable(s[0]);
-    need(t && isInt(t.count, 1, 6), '마우스가 DPI 표를 돌려주지 않았습니다.');
+    need(t && isInt(t.count, 1, 6), tr('마우스가 DPI 표를 돌려주지 않았습니다.'));
     const stages = t.stages.slice();
     want.dpiStages.forEach((dpi, i) => {
       if (dpi === stages[i]) return;
       checkDpi(dpi, 200, this.model?.dpiMax ?? 26000);
       stages[i] = dpi;
     });
-    need(isInt(want.activeDpiStage, 0, t.count - 1), '현재 DPI 단계가 범위를 벗어났습니다.');
+    need(isInt(want.activeDpiStage, 0, t.count - 1), tr('현재 DPI 단계가 범위를 벗어났습니다.'));
     await this.tell(0x0103, [t.profile, t.axis, t.splitY, t.count, want.activeDpiStage, ...stages.flatMap(v => [v & 0xff, v >> 8])]);
   }
 
@@ -534,10 +535,10 @@ class V3Driver extends Driver {
   async writeButtons(want, changed) {
     const s = await this.freshSettings();
     const table = parseButtons(await this.ask(0x0001, [s[0], 0, act.V3_BUTTONS.length]));
-    need(table, '마우스가 버튼 표를 돌려주지 않았습니다.');
+    need(table, tr('마우스가 버튼 표를 돌려주지 않았습니다.'));
     for (const button of changed) {
       const entry = act.v3Encode(button, want.buttonMappings[button]);
-      need(entry, `${button} 버튼에 쓸 수 없는 동작입니다.`);
+      need(entry, tr('{button} 버튼에 쓸 수 없는 동작입니다.', { button }));
       table[button] = entry;
     }
     await this.tell(0x0101, [s[0], 0, act.V3_BUTTONS.length, ...act.V3_BUTTONS.flatMap(b => [table[b].type, ...table[b].bytes])]);
@@ -545,7 +546,7 @@ class V3Driver extends Driver {
 
   async setProfile(number) {
     const s = await this.freshSettings();
-    need(isInt(number, 1, 16), '프로필 번호가 범위를 벗어났습니다.');
+    need(isInt(number, 1, 16), tr('프로필 번호가 범위를 벗어났습니다.'));
     s[0] = number - 1;
     await this.tell(0x0102, s);
   }
@@ -587,7 +588,7 @@ class A5Driver extends Driver {
         if (round === 3) await this.device.sendFeatureReport(this.report, body);
         await wait(30);
       }
-      throw new Error(`MCHOSE A5가 명령(${page}:${command.toString(16)})에 답하지 않았습니다.`);
+      throw new Error(tr('MCHOSE A5가 명령({command})에 답하지 않았습니다.', { command: `${page}:${command.toString(16)}` }));
     });
   }
   maybe(...args) { return this.ask(...args).catch(() => null); }
@@ -634,7 +635,7 @@ class A5Driver extends Driver {
       motionSync: toggles.motionSync ? toggles.motionSync[6] > 0 : null,
       angleSnapping: toggles.angleSnapping ? toggles.angleSnapping[6] > 0 : null,
       rippleControl: toggles.rippleControl ? toggles.rippleControl[6] > 0 : null,
-      firmware: fw ? [`마우스 ${[6, 7, 8, 9].map(i => String(fw[i]).padStart(2, '0')).join('.')}`] : [],
+      firmware: fw ? [tr('마우스 {version}', { version: [6, 7, 8, 9].map(i => String(fw[i]).padStart(2, '0')).join('.') })] : [],
       ui: {
         settingsReady: !!(dpi && rate),
         statusNote: null,
@@ -647,12 +648,12 @@ class A5Driver extends Driver {
     const touched = new Set(keys.map(k => k.split('.')[0]));
     const profile = want.activeProfile || 1;
     if (touched.has('pollingRateHz')) {
-      need(this.rates().includes(want.pollingRateHz), `이 연결에서는 ${want.pollingRateHz} Hz를 쓸 수 없습니다.`);
+      need(this.rates().includes(want.pollingRateHz), tr('이 연결에서는 {rate} Hz를 쓸 수 없습니다.', { rate: want.pollingRateHz }));
       await this.ask(1, 0x00, 1, [A5_RATE_CODE[want.pollingRateHz]]);
     }
     if (touched.has('dpiStages') || touched.has('activeDpiStage')) {
       const stages = want.dpiStages;
-      need(isInt(stages.length, 1, 6) && isInt(want.activeDpiStage, 0, stages.length - 1), 'DPI 단계가 범위를 벗어났습니다.');
+      need(isInt(stages.length, 1, 6) && isInt(want.activeDpiStage, 0, stages.length - 1), tr('DPI 단계가 범위를 벗어났습니다.'));
       stages.forEach(dpi => checkDpi(dpi, 50, 26000));
       // 단계마다 X·Y 값을 같은 값으로 [상위, 하위, 상위, 하위] 순서로 쓴다.
       if (touched.has('dpiStages')) {
@@ -663,22 +664,22 @@ class A5Driver extends Driver {
     }
     if (touched.has('sleepTimeout')) {
       const seconds = Math.round(want.sleepTimeout);
-      need(isInt(seconds, 0, 0xffff), '절전 시간이 범위를 벗어났습니다.');
+      need(isInt(seconds, 0, 0xffff), tr('절전 시간이 범위를 벗어났습니다.'));
       await this.ask(0, 0x07, 2, [seconds >> 8, seconds & 0xff]);
     }
     if (touched.has('debounceMs')) {
-      need(isInt(want.debounceMs, 0, 15), '디바운스는 0~15 ms입니다.');
+      need(isInt(want.debounceMs, 0, 15), tr('디바운스는 0~15 ms입니다.'));
       await this.ask(0, 0x08, 2, [profile, want.debounceMs]);
     }
     if (touched.has('liftOffDistance')) await this.ask(1, 0x08, 1, [want.liftOffDistance === 'High' ? 2 : 1]);
     for (const [key, cmd] of Object.entries(A5_TOGGLE)) {
       if (touched.has(key)) await this.ask(1, cmd, 1, [want[key] ? 1 : 0]);
     }
-    need(!touched.has('buttonMappings') && !touched.has('powerMode') && !touched.has('angleTuning'), '이 기종에서 바꿀 수 없는 항목입니다.');
+    need(!touched.has('buttonMappings') && !touched.has('powerMode') && !touched.has('angleTuning'), tr('이 기종에서 바꿀 수 없는 항목입니다.'));
   }
 
   async setProfile(number) {
-    need(isInt(number, 1, 3), '프로필은 1~3입니다.');
+    need(isInt(number, 1, 3), tr('프로필은 1~3입니다.'));
     await this.ask(0, 0x05, 1, [number]);
   }
 }
@@ -718,7 +719,7 @@ export function createClient(devices) {
   if (v3) return new V3Driver(v3);
   const v2 = devices.find(d => d.vendorId === MCHOSE && d.productId !== DOCK_PID && !V3_PIDS.includes(d.productId) && configChannel(d));
   if (v2) return new V2Driver(v2);
-  throw new Error('지원하는 MCHOSE 설정 인터페이스가 없습니다. MagDock·펌웨어 업데이트 인터페이스는 마우스 설정 대상이 아닙니다.');
+  throw new Error(tr('지원하는 MCHOSE 설정 인터페이스가 없습니다. MagDock·펌웨어 업데이트 인터페이스는 마우스 설정 대상이 아닙니다.'));
 }
 
 const FIELDS = ['pollingRateHz', 'activeDpiStage', 'debounceMs', 'sleepTimeout', 'liftOffDistance',
@@ -734,7 +735,7 @@ export function changes(before, after) {
   (after.dpiStages || []).forEach((dpi, i) => { if (dpi !== before.dpiStages?.[i]) keys.push(`dpiStages.${i}`); });
   for (const [button, action] of Object.entries(after.buttonMappings || {})) {
     if (action === before.buttonMappings?.[button]) continue;
-    if (button === 'Left') throw new Error('왼쪽 버튼은 기본 클릭을 유지합니다.');
+    if (button === 'Left') throw new Error(tr('왼쪽 버튼은 기본 클릭을 유지합니다.'));
     keys.push(`buttonMappings.${button}`);
   }
   return keys;
@@ -746,10 +747,8 @@ const valueAt = (s, key) => key.split('.').reduce((v, part) => v?.[part], s);
 export async function saveChanges(client, before, desired) {
   const keys = changes(before, desired);
   const fresh = await client.readStatus();
-  need(fresh.ui?.settingsReady && knownStatus(fresh) && fresh.name === before.name && fresh.connectionType === before.connectionType,
-    '기기 또는 편집 가능 상태가 바뀌었습니다. 다시 연결해 주세요.');
-  need(JSON.stringify(editableSnapshot(fresh)) === JSON.stringify(editableSnapshot(before)),
-    '기기 설정이 외부에서 바뀌었습니다. 다시 읽은 뒤 수정해 주세요.');
+  need(fresh.ui?.settingsReady && knownStatus(fresh) && fresh.name === before.name && fresh.connectionType === before.connectionType, tr('기기 또는 편집 가능 상태가 바뀌었습니다. 다시 연결해 주세요.'));
+  need(JSON.stringify(editableSnapshot(fresh)) === JSON.stringify(editableSnapshot(before)), tr('기기 설정이 외부에서 바뀌었습니다. 다시 읽은 뒤 수정해 주세요.'));
   if (keys.length) await client.apply(keys, desired);
   const back = await client.readStatus();
   // V3는 버튼의 원래 동작(오른쪽 버튼의 「오른쪽 클릭」 등)과 「기본값」이 같은 바이트라, 버튼은 기록 바이트로 비교한다.
@@ -757,7 +756,7 @@ export async function saveChanges(client, before, desired) {
     ? client.sameButton(key.slice('buttonMappings.'.length), a, b) : a === b;
   const failed = keys.filter(key => !same(key, valueAt(back, key), valueAt(desired, key)));
   need(back.activeProfile === before.activeProfile && !failed.length,
-    `기록 후 검증에 실패했습니다: ${failed.join(', ') || '프로필 변경'}`);
+    tr('기록 후 검증에 실패했습니다: {items}', { items: failed.join(', ') || tr('프로필 변경') }));
   return back;
 }
 

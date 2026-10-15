@@ -1,0 +1,18 @@
+{
+  "name": "gomm",
+  "private": true,
+  "description": "GOMM — Global Onboard Memory Manager (static WebHID web app)",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:browser",
+    "test:unit": "node --test tests/*.test.mjs",
+    "test:browser": "node tests/browser.mjs",
+    "serve": "python -m http.server 8765 --bind 127.0.0.1"
+  },
+  "devDependencies": {
+    "playwright-core": "1.47.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

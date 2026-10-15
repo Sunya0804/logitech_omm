@@ -1,939 +1,259 @@
-(function (OMM) {
-  'use strict';
+// 앱의 뼈대: 기기 연결과 브랜드별 화면 선택, 홈·상태 줄·저장 막대, 데모, 언어 전환.
+// 브랜드별 화면(logitech-ui, compx-ui, mchose-ui)은 같은 모양의 함수 묶음을 내보낸다.
+import * as C from './compx.js';
+import * as logitech from './logitech-ui.js';
+import * as compxUi from './compx-ui.js';
+import * as mchoseUi from './mchose-ui.js';
+import * as tester from './tester.js';
+import { deviceImage } from './device-images.js';
+import { t, num, translateDom, setLang, getLang, onLangChange, LANGS } from './i18n.js';
+import { $, h, app, shell, toast, busy } from './ui.js';
 
-  const P = OMM.profile;
-  const K = OMM.keys;
-  const $ = (sel) => document.querySelector(sel);
+const UIS = [logitech, compxUi, mchoseUi];
+const active = () => UIS.find((ui) => ui.connected()) || null;
 
-  // 실기기로 읽어 본 프로필 형식: 4는 PRO X Wireless, 5는 G502 X PLUS, 7은 PRO X 2 DEX. 1~3은 같은 구조다.
-  // 8(SUPERSTRIKE)은 직접 읽어 보지는 못했지만 공개된 실기기 덤프와 구조가 일치한다.
-  // 나머지(6, 10)는 공식 OMM의 구조 정보만 따른 것이라 사용자가 동의해야 편집을 연다.
-  const DEVICE_VERIFIED_FORMATS = [1, 2, 3, 4, 5, 7, 8];
-  const LAYOUT_NAMES = {
-    classic: '기본 구조', classicDpiY: '기본 구조 + 세로 DPI', extendedBasic: '확장 구조', extended: '확장 구조', analog: '확장 구조 + HITS',
-  };
-  const LOD_LEVELS = [[1, '낮음'], [2, '중간'], [3, '높음']];
-  const BUNNY_HOP_MS = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
-  const ANALOG_BUTTON_NAMES = ['좌클릭', '우클릭'];
-  const EXTENDED_RATE_INDEXES = [0, 1, 2, 3, 4, 5, 6]; // 값 = 인덱스, 125 << i Hz
-  const DEFAULT_DPI_RANGE = { min: 100, max: 25600, step: 50 };
-  const ROM_BASE = 0x0100;
-  // 기기가 아날로그 버튼의 단계 수를 알려 주지 않을 때 쓰는 값 (PRO X2 SUPERSTRIKE의 G HUB 기준)
-  const DEFAULT_ANALOG_CAPS = { actuationMax: 10, hapticMax: 5, rtMax: 5 };
-  const ISSUE_URL = 'https://github.com/Sunya0804/logitech_omm/issues/new';
+// ---------- 연결 ----------
 
-  const st = {
-    transport: null, hidpp: null, op: null,
-    name: '', battery: null, desc: null, dpiRange: DEFAULT_DPI_RANGE, rateIndexes: null, analogCaps: null, layout: null,
-    profiles: [], dirValid: false, crcTrusted: false,
-    current: 0, mode: OMM.MODE.ONBOARD,
-    view: 'home', selected: 0, tab: 'overview', layer: 'buttons', unlock: false, busy: false,
-  };
+// 다른 기기와의 연결을 끊고 ui로 연결한다. 실패하면 그 화면의 상태도 비운다.
+async function connectWith(ui, arg, message) {
+  await disconnect();
+  const ok = await busy(message, (setMsg) => ui.connect(arg, setMsg));
+  if (!ok) await ui.disconnect();
+  render();
+  if (ok) setView('config');
+  return ok;
+}
 
-  // ---------- DOM 도우미 ----------
+async function disconnect() {
+  for (const ui of UIS) await ui.disconnect();
+  app.demo = false;
+}
 
-  function h(tag, attrs, ...kids) {
-    const el = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs || {})) {
-      if (k === 'class') el.className = v;
-      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-      else if (v === true) el.setAttribute(k, '');
-      else if (v !== false && v != null) el.setAttribute(k, v);
+// 기기 선택 창을 띄우고, 고른 기기의 제조사에 맞는 방식으로 연결한다.
+async function requestConnect() {
+  try {
+    const picked = await navigator.hid.requestDevice({ filters: [...logitech.filters, ...C.filters, ...mchoseUi.filters] });
+    if (!picked.length) return;
+    const vendor = picked[0].vendorId;
+    if (mchoseUi.filters.some((f) => f.vendorId === vendor)) return await connectWith(mchoseUi, picked, t('MCHOSE 기기 읽는 중…'));
+    if (C.VENDOR_IDS.includes(vendor)) return await connectWith(compxUi, picked, t('기기 읽는 중…'));
+    await connectWith(logitech, logitech.transportFor(picked), t('기기 검색 중…'));
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// ---------- 데모 ----------
+
+// 실제 기기 없이 화면을 둘러보는 가상 기기. 모두 메모리 안에서만 동작하고 WebHID에 접근하지 않는다.
+// MCHOSE는 실기기(K7 Ultra)에서 읽어 둔 응답을 재생한다.
+async function connectDemo(kind) {
+  try {
+    if (kind === 'logitech') {
+      const { MockTransport } = await import('./mock.js');
+      await connectWith(logitech, new MockTransport('analog'), t('기기 검색 중…'));
+    } else if (kind === 'mchose') {
+      const { CapturedMouse } = await import(new URL('tests/mchose-fixture.mjs', document.baseURI).href);
+      const captures = await (await fetch('tests/fixtures/mchose-hardware.json')).json();
+      await connectWith(mchoseUi, [new CapturedMouse(captures[0])], t('MCHOSE 기기 읽는 중…'));
+    } else {
+      const { MockCompxDevice } = await import('./mock-compx.js');
+      const atk = kind === 'atk';
+      const dev = atk ? new MockCompxDevice({ vendorId: C.VENDOR_ATK, productName: 'ATK A9 Ultra', cid: 2, mid: 87 }) : new MockCompxDevice();
+      // 가상 기기의 기본 DPI 기록은 VGN 방식이라, ATK A9 Ultra(10 단위 방식)는 그 방식으로 다시 쓴다.
+      const model = C.modelFor(dev.vendorId, dev.identity.cid, dev.identity.mid);
+      if (atk) for (const bank of dev.banks) [400, 800, 1600, 3200].forEach((dpi, i) => C.setDpi(bank, i, dpi, model));
+      await connectWith(compxUi, [dev], t('기기 읽는 중…'));
     }
-    for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid);
-    return el;
+  } catch (e) {
+    toast(e.message, 'error');
   }
+  app.demo = !!active();
+  render();
+}
 
-  function toast(message, kind = 'info') {
-    const el = h('div', { class: 'toast ' + kind }, message);
-    $('#toasts').append(el);
-    setTimeout(() => el.remove(), kind === 'error' ? 8000 : 3500);
+// ---------- 화면 ----------
+
+const VIEW_TITLES = { home: '홈', config: '기기 설정', test: '마우스 테스트' };
+let view = 'home';
+
+function setView(next) {
+  view = next;
+  document.body.dataset.view = next;
+  for (const btn of document.querySelectorAll('#views button')) {
+    const on = btn.dataset.view === next;
+    btn.classList.toggle('active', on);
+    if (on) btn.setAttribute('aria-current', 'page');
+    else btn.removeAttribute('aria-current');
   }
+  $('#page-title').textContent = t(VIEW_TITLES[next]);
+}
 
-  function ask(title, lines, okLabel) {
-    const dlg = $('#confirm');
-    $('#confirm-title').textContent = title;
-    $('#confirm-body').replaceChildren(...lines.map((l) => h('p', null, l)));
-    $('#confirm-ok').textContent = okLabel;
-    dlg.showModal();
-    // close 이벤트는 탭이 가려져 있으면 늦게 오므로 버튼 제출과 Esc(cancel)를 직접 받는다.
-    return new Promise((resolve) => {
-      const form = dlg.querySelector('form');
-      const finish = (ok) => {
-        form.removeEventListener('submit', onSubmit);
-        dlg.removeEventListener('cancel', onCancel);
-        resolve(ok);
-      };
-      const onSubmit = (e) => finish(!!e.submitter && e.submitter.value === 'ok');
-      const onCancel = () => finish(false);
-      form.addEventListener('submit', onSubmit);
-      dlg.addEventListener('cancel', onCancel);
-    });
+function statusChips(sum) {
+  const b = sum.battery;
+  return [
+    sum.dpi && h('span', { class: 'chip' }, `DPI ${num(sum.dpi)}`),
+    sum.rate && h('span', { class: 'chip' }, `${num(sum.rate)} Hz`),
+    sum.profileLabel && h('span', { class: 'chip' }, sum.profileLabel),
+    b && h('span', { class: 'chip', title: t('배터리') },
+      h('span', { class: 'battery' + (b.percent <= 20 ? ' low' : ''), 'aria-hidden': 'true' }, h('i', { style: `width:${Math.min(100, b.percent)}%` })),
+      h('span', { class: 'sr-only' }, t('배터리') + ' '),
+      `${b.percent}%`, b.charging && h('span', { title: t('충전 중'), 'aria-label': t('충전 중') }, ' ⚡')),
+  ].filter(Boolean);
+}
+
+const MOUSE_ART = '<svg class="device-art" viewBox="0 0 200 300" aria-hidden="true">'
+  + '<defs><linearGradient id="art-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cc9ff"/><stop offset="1" stop-color="#8b7bff"/></linearGradient></defs>'
+  + '<rect x="32" y="14" width="136" height="272" rx="68" class="art-body"/>'
+  + '<path d="M100 14v114M32 128h136" class="art-line"/>'
+  + '<rect x="90" y="44" width="20" height="52" rx="10" class="art-wheel"/>'
+  + '<rect x="16" y="132" width="16" height="40" rx="7" class="art-side"/><rect x="16" y="178" width="16" height="40" rx="7" class="art-side"/>'
+  + '<path d="M72 236h56" class="art-glow"/></svg>';
+
+// 홈: 연결된 기기 카드와 "다른 기기 연결" 카드.
+function renderHome(ui) {
+  const root = $('#home-devices');
+  if (!ui) return root.replaceChildren();
+  const sum = ui.summary();
+  const art = h('div', { class: 'device-art-wrap' });
+  art.innerHTML = MOUSE_ART;
+  const photo = deviceImage(sum.name);
+  if (photo) {
+    const img = h('img', { src: photo.image, alt: t('{name} 공식 제품 사진', { name: sum.name }), class: 'device-photo',
+      referrerpolicy: 'no-referrer', onerror: () => { art.innerHTML = MOUSE_ART; } });
+    art.replaceChildren(img);
   }
+  root.replaceChildren(
+    h('article', { class: 'device-card', 'aria-label': sum.name },
+      h('div', { class: 'device-card-head' },
+        h('div', null, h('h3', null, sum.name), h('p', { class: 'hint' }, sum.modeText)),
+        h('span', { class: 'chip ok' }, t('연결됨'))),
+      art,
+      h('div', { class: 'device-chips' }, statusChips(sum)),
+      h('button', { class: 'primary', onclick: () => setView('config') }, t('설정 열기'))),
+    h('article', { class: 'device-card add' },
+      h('h3', null, t('다른 기기 연결')),
+      h('p', { class: 'hint' }, t('한 번에 한 기기만 연결됩니다. 새 기기를 고르면 지금 기기와의 연결은 끊어집니다.')),
+      h('button', { onclick: requestConnect, disabled: !('hid' in navigator) }, t('+ 기기 선택'))));
+}
 
-  // 기기와 통신하는 작업을 한 번에 하나만 실행하고, 실패하면 알림을 띄운다.
-  async function busy(message, fn) {
-    if (st.busy) return false;
-    st.busy = true;
-    const setMsg = (m) => ($('#busy-msg').textContent = m);
-    setMsg(message);
-    $('#busy').hidden = false;
-    try {
-      await fn(setMsg);
-      return true;
-    } catch (e) {
-      console.error(e);
-      toast(e.message || String(e), 'error');
-      return false;
-    } finally {
-      st.busy = false;
-      $('#busy').hidden = true;
-    }
+function renderDeviceBar(ui) {
+  const bar = $('#device');
+  if (!ui) return bar.replaceChildren();
+  const sum = ui.summary();
+  bar.replaceChildren(...[
+    app.demo && h('span', { class: 'chip demo' }, t('데모')),
+    h('strong', null, sum.name),
+    ...statusChips(sum),
+    ...(ui.deviceBarExtras?.() || []),
+  ].filter(Boolean));
+}
+
+function renderActionBar() {
+  const ui = active();
+  if (!ui) return;
+  const dirty = ui.isDirty();
+  const editable = ui.canEdit();
+  $('#dirty-count').textContent = (dirty && ui.dirtyText?.()) || (dirty ? t('저장되지 않은 변경이 있습니다') : t('변경 사항 없음'));
+  $('#btn-save').disabled = !dirty || !editable;
+  $('#btn-revert').disabled = !dirty;
+  $('#btn-import').disabled = !editable;
+}
+
+function render() {
+  const ui = active();
+  const connected = !!ui;
+  $('#home-hero').hidden = connected;
+  $('#home-devices').hidden = !connected;
+  $('#config-empty').hidden = connected;
+  $('#workspace').hidden = !connected;
+  $('#actionbar').hidden = !connected;
+  $('#btn-disconnect').hidden = !connected;
+  $('#demo-banner').hidden = !(connected && app.demo);
+  renderDeviceBar(ui);
+  renderHome(ui);
+  if (!ui) return;
+  $('#sidebar').hidden = !ui.renderProfiles($('#sidebar'));
+  ui.render($('#editor'));
+  renderActionBar();
+}
+
+// MCHOSE 지원 목록(홈 화면 아래 접히는 칸)
+function renderCatalog() {
+  const root = $('#mchose-catalog');
+  const open = root.open;
+  root.replaceChildren(
+    h('summary', null, t('MCHOSE 지원 목록 ({n}개 기종·연결 변형)', { n: mchoseUi.catalog.length })),
+    h('p', { class: 'hint' }, t('목록에 있어도 기기 데이터를 확인한 뒤 편집합니다. K7 Ultra와 A7 V2 Ultra+는 설정 읽기를 확인했습니다.')),
+    ...['A5 Gen1', 'V2', 'V3'].map((family) => h('p', null,
+      h('strong', null, family + ': '),
+      mchoseUi.catalog.filter((p) => p.family === family).map((p) => p.name + (p.readOnly ? ' ' + t('(읽기 전용)') : '')).join(', '))),
+    h('a', { href: 'docs/mchose-support.md', target: '_blank', rel: 'noopener' }, t('지원 범위·검증 기록')));
+  root.open = open;
+}
+
+function renderLangPicker() {
+  $('#lang').replaceChildren(...LANGS.map(([id, label]) => h('option', { value: id, selected: id === getLang() }, label)));
+}
+
+// ---------- 초기화 ----------
+
+function init() {
+  shell.refresh = render;
+  shell.refreshActions = renderActionBar;
+  const supported = 'hid' in navigator;
+  $('#unsupported').hidden = supported;
+  for (const btn of document.querySelectorAll('.btn-connect')) {
+    btn.disabled = !supported;
+    btn.addEventListener('click', requestConnect);
   }
-
-  // ---------- 연결 / 읽기 ----------
-
-  async function connect(transport) {
-    await disconnect();
-    const ok = await busy('기기 검색 중…', async (setMsg) => {
-      await transport.open();
-      st.transport = transport;
-      const hidpp = (st.hidpp = new OMM.Hidpp(transport));
-      if (!(await hidpp.probe())) {
-        throw new Error('HID++ 2.0 기기가 응답하지 않습니다. 무선 기기라면 전원이 켜져 있는지 확인하세요.');
-      }
-      st.name = (await hidpp.getName()) || transport.name || 'Logitech 기기';
-      const featIdx = await hidpp.getFeature(OMM.FEATURE.ONBOARD_PROFILES);
-      if (!featIdx) throw new Error(`${st.name}: 온보드 메모리(HID++ 0x8100)를 지원하지 않는 기기입니다.`);
-      st.op = new OMM.OnboardProfiles(hidpp, featIdx);
-      st.battery = await hidpp.getBattery().catch(() => null);
-      st.dpiRange = (await hidpp.getDpiRange().catch(() => null)) || DEFAULT_DPI_RANGE;
-      st.rateIndexes = await hidpp.getReportRateIndexes().catch(() => null);
-      st.analogCaps = await hidpp.getAnalogCapabilities().catch(() => null);
-      hidpp.onEvent = (idx, fn, params) => {
-        if (idx !== featIdx || fn !== 0) return;
-        st.current = (params[0] << 8) | params[1];
-        renderSidebar();
-      };
-      await loadProfiles(setMsg);
-    });
-    if (!ok) await disconnect();
+  for (const btn of document.querySelectorAll('#views button')) btn.addEventListener('click', () => setView(btn.dataset.view));
+  for (const btn of document.querySelectorAll('[data-demo]')) btn.addEventListener('click', () => connectDemo(btn.dataset.demo));
+  $('#btn-disconnect').addEventListener('click', async () => { await disconnect(); render(); });
+  $('#btn-save').addEventListener('click', () => active()?.save());
+  $('#btn-revert').addEventListener('click', () => active()?.revert());
+  $('#btn-export').addEventListener('click', () => active()?.exportBackup());
+  $('#btn-diagnostics').addEventListener('click', () => active()?.exportDiagnostics());
+  $('#btn-import').addEventListener('click', () => $('#import-file').click());
+  $('#import-file').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) active()?.importBackup(file);
+    e.target.value = '';
+  });
+  $('#lang').addEventListener('change', (e) => setLang(e.target.value));
+  onLangChange(() => {
+    $('#toasts').replaceChildren(); // 이전 언어로 뜬 알림은 지운다
+    setView(view);
+    renderCatalog();
+    renderLangPicker();
+    tester.relabel();
     render();
-    if (ok) setView('config');
-  }
-
-  // 다른 프로토콜(compx-ui.js)로 연결된 기기가 있는지. 그 모듈은 이 파일보다 늦게 로드된다.
-  const externalUi = () => [OMM.mchoseUi, OMM.compxUi].find(ui => ui && ui.connected()) || null;
-
-  async function connectCompx(devices) {
-    await disconnect();
-    const ok = await busy('기기 읽는 중…', () => OMM.compxUi.connect(devices));
-    if (!ok) await OMM.compxUi.disconnect();
-    render();
-    if (ok) setView('config');
-  }
-
-  async function connectMchose(devices) {
-    await disconnect();
-    const ok = await busy("MCHOSE 기기 읽는 중…", () => OMM.mchoseUi.connect(devices));
-    if (!ok) await OMM.mchoseUi.disconnect();
-    render();
-    if (ok) setView("config");
-  }
-
-  async function disconnect() {
-    if (OMM.mchoseUi) await OMM.mchoseUi.disconnect();
-    if (OMM.compxUi) await OMM.compxUi.disconnect();
-    if (st.transport) await st.transport.close().catch(() => {});
-    Object.assign(st, { transport: null, hidpp: null, op: null, desc: null, layout: null, profiles: [], selected: 0, unlock: false });
-  }
-
-  async function loadProfiles(setMsg) {
-    const op = st.op;
-    const d = (st.desc = await op.getDescription());
-    st.mode = await op.getMode();
-    st.crcTrusted = false;
-
-    // CRC가 맞는 섹터만 돌려준다. 맞는 섹터를 하나라도 읽으면 CRC 구현이 이 기기와 일치함이 확인된다.
-    const readValid = async (sector) => {
-      try {
-        const data = await op.readSector(sector, d.sectorSize);
-        if (!P.hasValidCrc(data)) return null;
-        st.crcTrusted = true;
-        return data;
-      } catch (e) {
-        if (e instanceof OMM.HidppError) return null;
-        throw e;
-      }
-    };
-
-    setMsg('프로필 목록 읽는 중…');
-    const dirSector = await readValid(0x0000);
-    const dir = dirSector && P.parseDirectory(dirSector, d.profileCount);
-    st.dirValid = !!dir;
-
-    const profiles = [];
-    for (let i = 0; i < d.profileCount; i++) {
-      setMsg(`프로필 ${i + 1}/${d.profileCount} 읽는 중…`);
-      const entry = dir && dir[i];
-      let source = 'user';
-      let sector = entry ? entry.sector : i + 1;
-      let raw = entry ? await readValid(sector) : null;
-      if (!raw) {
-        // 사용자 영역이 비어 있으면 기기는 ROM(공장 초기값) 프로필을 쓴다.
-        source = 'rom';
-        sector = ROM_BASE + (i < d.profileCountOob ? i + 1 : 1);
-        raw = await readValid(sector);
-      }
-      const enabled = entry ? entry.enabled : !dir && i < Math.max(1, d.profileCountOob);
-      profiles.push({ index: i, sector, source, raw, orig: raw && raw.slice(), enabled: !!raw && enabled, origEnabled: !!raw && enabled });
-    }
-    st.profiles = profiles;
-    const sample = profiles.find((p) => p.raw);
-    st.layout = sample ? P.detectLayout(sample.raw, d.profileFormatId, d.buttonCount, st.dpiRange) : null;
-    st.current = await op.getCurrentProfile();
-    if (st.selected >= profiles.length) st.selected = 0;
-    const cur = profiles.findIndex(isCurrent);
-    if (cur >= 0) st.selected = cur;
-  }
-
-  // ---------- 상태 판정 ----------
-
-  const isCurrent = (p) => (st.current & 0xff) === p.index + 1;
-  const isDirty = (p) => !!p.raw && (!P.sameData(p.raw, p.orig) || p.enabled !== p.origEnabled);
-  const needsSectorWrite = (p) => !!p.raw && (p.source !== 'user' || p.sector !== p.index + 1 || !P.sameData(p.raw, p.orig));
-  const layoutKnown = () => !!st.layout;
-  const formatVerified = () => layoutKnown() && DEVICE_VERIFIED_FORMATS.includes(st.desc.profileFormatId);
-  const canEdit = () => st.crcTrusted && layoutKnown() && (formatVerified() || st.unlock);
-
-  function profileTitle(p) {
-    const name = p.raw && layoutKnown() ? P.parse(p.raw, st.layout).name : '';
-    return name || `프로필 ${p.index + 1}`;
-  }
-
-  // ---------- 기기에 쓰는 동작 ----------
-
-  async function save() {
-    const dirty = st.profiles.filter(isDirty);
-    if (!dirty.length || !canEdit()) return;
-    if (!st.profiles.some((p) => p.enabled)) return toast('최소 한 개의 프로필은 사용 상태여야 합니다.', 'error');
-    const ok = await ask('기기에 저장', [
-      `${dirty.map(profileTitle).join(', ')}의 변경 내용을 ${st.name}의 온보드 메모리에 씁니다.`,
-      '쓰는 동안 기기를 분리하거나 전원을 끄지 마세요. 저장 전에 「백업 내보내기」로 현재 상태를 보관해 두는 것을 권장합니다.',
-    ], '저장');
-    if (!ok) return;
-
-    let reloadFailed = false;
-    let liveFailed = false;
-    const done = await busy('저장 중…', async (setMsg) => {
-      const { op } = st;
-      const writeVerified = async (sector, data, label) => {
-        setMsg(`${label} 쓰는 중…`);
-        await op.writeSector(sector, data);
-        const back = await op.readSector(sector, data.length);
-        if (P.toHex(back) !== P.toHex(data)) throw new Error(`${label}: 기록 후 검증에 실패했습니다. 다시 저장해 보세요.`);
-      };
-
-      const sectorWrites = st.profiles.filter(needsSectorWrite);
-      const dirChanged = !st.dirValid || sectorWrites.some((p) => p.source !== 'user' || p.sector !== p.index + 1)
-        || st.profiles.some((p) => p.enabled !== p.origEnabled);
-
-      for (const p of sectorWrites) {
-        await writeVerified(p.index + 1, P.finalize(p.raw), profileTitle(p));
-        Object.assign(p, { source: 'user', sector: p.index + 1, orig: p.raw.slice() });
-      }
-      if (dirChanged) {
-        await writeVerified(0x0000, P.buildDirectory(st.desc.sectorSize, st.profiles.map((p) => p.enabled)), '프로필 목록');
-        st.dirValid = true;
-        st.profiles.forEach((p) => (p.origEnabled = p.enabled));
-      }
-
-      // 현재 프로필을 다시 지정해야 기기가 새 내용을 불러온다. 호스트 모드에서는 온보드 프로필이
-      // 쓰이지 않아 기기가 이 명령을 거부하므로 건너뛴다. 온보드 모드로 바꾸면 그때 불러온다.
-      if (st.mode !== OMM.MODE.ONBOARD) return;
-      const active = st.profiles.find((p) => isCurrent(p) && p.enabled) || st.profiles.find((p) => p.enabled);
-      try {
-        await op.setCurrentProfile(active.index + 1);
-        st.current = active.index + 1;
-        // HITS 값은 프로필을 다시 불러오는 것만으로 바로 바뀌는지 확인되지 않아, 현재 값으로도 직접 적용한다.
-        const L = st.layout;
-        if (L.analog && active.raw) {
-          try {
-            for (let i = 0; i < L.analog.count; i++) await st.hidpp.setAnalogLive(i, P.analogBytes(active.raw, L, i));
-          } catch (e) {
-            if (!(e instanceof OMM.HidppError)) throw e;
-            liveFailed = true;
-          }
-        }
-      } catch (e) {
-        // 기록과 검증은 이미 끝났으므로 저장 실패로 취급하지 않는다.
-        if (!(e instanceof OMM.HidppError)) throw e;
-        reloadFailed = true;
-      }
-    });
-    if (done && st.mode !== OMM.MODE.ONBOARD) toast('저장했습니다. 기기가 호스트 모드라서, 온보드 메모리 모드로 바꿔야 적용됩니다.', 'ok');
-    else if (done && liveFailed) toast('저장했습니다. HITS 값을 바로 적용하지는 못했으니, 마우스를 껐다 켜면 적용됩니다.', 'ok');
-    else if (done && reloadFailed) toast('저장했습니다. 기기가 프로필 다시 불러오기를 거부했으니, 마우스를 껐다 켜면 적용됩니다.', 'ok');
-    else if (done) toast('저장했습니다.', 'ok');
-    render();
-  }
-
-  function revert() {
-    for (const p of st.profiles) {
-      if (p.raw) p.raw.set(p.orig);
-      p.enabled = p.origEnabled;
-    }
-    render();
-  }
-
-  async function activate(p) {
-    await busy('프로필 전환 중…', async () => {
-      await st.op.setCurrentProfile(p.sector);
-      st.current = await st.op.getCurrentProfile();
-    });
-    render();
-  }
-
-  async function setMode(mode) {
-    await busy('모드 변경 중…', async () => {
-      await st.op.setMode(mode);
-      st.mode = await st.op.getMode();
-      st.current = await st.op.getCurrentProfile();
-    });
-    render();
-  }
-
-  // ---------- 백업 ----------
-
-  function exportBackup() {
-    const { desc } = st;
-    const backup = {
-      type: 'omm-web-backup', version: 1, device: st.name, exportedAt: new Date().toISOString(),
-      profileFormatId: desc.profileFormatId, sectorSize: desc.sectorSize,
-      profiles: st.profiles.map((p) => ({ index: p.index, enabled: p.enabled, data: p.raw ? P.toHex(P.finalize(p.raw.slice())) : null })),
-    };
-    download(backup, 'profiles');
-  }
-
-  function download(data, suffix, name = st.name) {
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    h('a', { href: url, download: `${name.replace(/[^\w-]+/g, '_')}-${suffix}.json` }).click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  // 새 기기 지원을 위한 읽기 전용 덤프: 기능 목록과 온보드 메모리의 모든 섹터.
-  async function exportDiagnostics() {
-    const ok = await ask('진단 정보 내보내기', [
-      '기기의 기능 목록과 온보드 메모리 전체(프로필, 버튼 할당, 매크로 포함)를 읽어 파일로 저장합니다. 기기에는 아무것도 쓰지 않습니다.',
-      '매크로에 입력해 둔 문구가 있다면 파일에 그대로 들어가니, 공유하기 전에 확인하세요.',
-    ], '내보내기');
-    if (!ok) return;
-    let diag;
-    const done = await busy('진단 정보 읽는 중…', async (setMsg) => {
-      const { hidpp, op, desc } = st;
-      const hex4 = (n) => n.toString(16).padStart(4, '0');
-      const descRaw = P.toHex(await hidpp.request(op.idx, 0x0));
-      const sectors = {};
-      const romCount = Math.max(1, desc.profileCountOob);
-      const numbers = [...Array(desc.sectorCount).keys(), ...Array.from({ length: romCount }, (_, i) => ROM_BASE + i + 1)];
-      for (const n of numbers) {
-        setMsg(`섹터 0x${hex4(n)} 읽는 중…`);
-        try {
-          sectors[hex4(n)] = P.toHex(await op.readSector(n, desc.sectorSize));
-        } catch (e) {
-          if (!(e instanceof OMM.HidppError)) throw e;
-          sectors[hex4(n)] = `error: ${e.message}`;
-        }
-      }
-      // 아날로그 버튼 기능(0x1B0C)이 있으면 값 범위가 담긴 첫 번째 조회 응답을 그대로 남긴다.
-      const analogIdx = await hidpp.getFeature(OMM.FEATURE.ANALOG_BUTTONS);
-      const analogCaps = analogIdx ? P.toHex(await hidpp.request(analogIdx, 0x0).catch(() => [])) : null;
-      diag = {
-        type: 'omm-web-diagnostics', version: 1, exportedAt: new Date().toISOString(),
-        device: st.name, deviceIndex: hidpp.devIdx,
-        features: (await hidpp.getFeatureList()).map((f) => `${f.index}:${hex4(f.id)}`),
-        onboard: { ...desc, descriptionRaw: descRaw, mode: st.mode, currentProfile: hex4(await op.getCurrentProfile()) },
-        dpiRange: st.dpiRange, reportRateIndexes: st.rateIndexes, analogCapabilities: analogCaps,
-        detectedLayout: st.layout ? st.layout.id : null,
-        sectors,
-      };
-    });
-    if (!done) return;
-    download(diag, 'diagnostics');
-    const send = await ask('진단 정보 보내기', [
-      '진단 파일을 저장했습니다. 이 기기를 지원 목록에 추가할 수 있도록 GitHub 이슈로 보내시겠어요?',
-      'GitHub 계정이 필요합니다. 열리는 이슈 작성 화면에 방금 저장한 파일을 끌어다 놓고 등록하면 됩니다. 이슈는 누구나 볼 수 있습니다.',
-    ], '이슈 작성 화면 열기');
-    if (!send) return;
-    const body = [
-      `기기: ${diag.device}`,
-      `프로필 형식: ${diag.onboard.profileFormatId} (${diag.detectedLayout || '알 수 없는 구조'})`,
-      '',
-      '아래에 진단 파일(.json)을 끌어다 놓아 첨부해 주세요.',
-      '',
-      '추가로 알려 줄 내용(잘못 표시되는 값, G HUB에서 바꾼 설정 등):',
-    ].join('\n');
-    window.open(`${ISSUE_URL}?title=${encodeURIComponent(`[진단] ${diag.device}`)}&body=${encodeURIComponent(body)}`, '_blank', 'noopener');
-  }
-
-  async function importBackup(file) {
-    try {
-      const b = JSON.parse(await file.text());
-      if (b.type !== 'omm-web-backup' || !Array.isArray(b.profiles)) throw new Error('GOMM 웹 백업 파일이 아닙니다.');
-      if (b.profileFormatId !== st.desc.profileFormatId || b.sectorSize !== st.desc.sectorSize) {
-        throw new Error(`이 기기와 호환되지 않는 백업입니다 (${b.device || '알 수 없는 기기'}).`);
-      }
-      const loaded = b.profiles.filter((e) => st.profiles[e.index] && e.data).map((e) => {
-        const data = P.fromHex(e.data);
-        if (data.length !== st.desc.sectorSize || !P.hasValidCrc(data)) throw new Error(`프로필 ${e.index + 1}의 백업 데이터가 손상되었습니다.`);
-        return [st.profiles[e.index], data, !!e.enabled];
-      });
-      for (const [p, data, enabled] of loaded) {
-        if (p.raw) p.raw.set(data);
-        else Object.assign(p, { raw: data, orig: new Uint8Array(data.length), source: 'rom' });
-        p.enabled = enabled;
-      }
-      toast(`프로필 ${loaded.length}개를 불러왔습니다. 「기기에 저장」을 눌러야 기기에 반영됩니다.`, 'ok');
-    } catch (e) {
-      toast(e.message, 'error');
-    }
-    render();
-  }
-
-  // ---------- 렌더링 ----------
-
-  const VIEW_TITLES = { home: '홈', config: '기기 설정', test: '마우스 테스트' };
-
-  function setView(view) {
-    st.view = view;
-    document.body.dataset.view = view;
-    for (const btn of document.querySelectorAll('#views button')) btn.classList.toggle('active', btn.dataset.view === view);
-    $('#page-title').textContent = VIEW_TITLES[view];
-  }
-
-  // 기기에 저장돼 있는 프로필의 요약: 기본 DPI, 보고율(Hz), DPI 단계 수. 읽을 수 없으면 null.
-  function profileSummary(p) {
-    if (!p || !p.orig || !layoutKnown()) return null;
-    const L = st.layout;
-    const m = P.parse(p.orig, L);
-    const stages = m.dpi.filter(Boolean);
-    const stage = m.dpi[m.defaultDpi] || stages[0];
-    const r = m.reportRates[0];
-    const rate = !L.reportRate.length ? null : L.rateUnit === 'ms' ? (r ? Math.round(1000 / r) : null) : 125 << r;
-    return { dpi: stage ? stage.x : null, rate, stages: stages.length };
-  }
-
-  const currentProfile = () => st.profiles.find(isCurrent);
-  const formatHz = (hz) => (hz >= 1000 ? `${hz / 1000}K` : String(hz));
-
-  // 여러 선택지 중 하나를 고르는 버튼 묶음. options: [[값, 표시]].
-  function choice(label, options, current, ro, onPick, extraClass = '') {
-    return h('div', { class: 'choice ' + extraClass, role: 'group', 'aria-label': label }, options.map(([v, text]) => h('button', {
-      class: v === current ? 'active' : '', disabled: ro, 'aria-pressed': String(v === current),
-      onclick: () => { if (v !== current) onPick(v); },
-    }, text)));
-  }
-
-  // 기기 선택 창을 띄우고, 고른 기기의 제조사에 맞는 방식으로 연결한다.
-  async function requestConnect() {
-    try {
-      const picked = await navigator.hid.requestDevice({ filters: [...OMM.WebHidTransport.filters, ...OMM.compx.filters, ...(OMM.mchoseUi?.filters || [])] });
-      if (!picked.length) return;
-      if (OMM.mchoseUi?.filters.some(f => f.vendorId === picked[0].vendorId)) return await connectMchose(picked);
-      if (OMM.compx.VENDOR_IDS.includes(picked[0].vendorId)) return await connectCompx(picked);
-      const transport = new OMM.WebHidTransport(picked);
-      if (!transport.out) throw new Error('선택한 기기에서 HID++ 인터페이스(리포트 0x11)를 찾지 못했습니다.');
-      await connect(transport);
-    } catch (e) {
-      toast(e.message, 'error');
-    }
-  }
-
-  // 홈 카드와 상태 줄에 쓰는 요약: {name, modeText, dpi, rate, profileLabel, battery}
-  function deviceSummary() {
-    if (externalUi()) return externalUi().summary();
-    const cur = currentProfile();
-    const sum = profileSummary(cur) || {};
-    return {
-      name: st.name, modeText: st.mode === OMM.MODE.ONBOARD ? '온보드 메모리 모드' : '호스트 모드',
-      dpi: sum.dpi, rate: sum.rate, profileLabel: cur ? profileTitle(cur) : null, battery: st.battery,
-    };
-  }
-
-  function statusChips() {
-    const sum = deviceSummary();
-    const b = sum.battery;
-    return [
-      sum.dpi && h('span', { class: 'chip' }, `DPI ${sum.dpi.toLocaleString()}`),
-      sum.rate && h('span', { class: 'chip' }, `${sum.rate.toLocaleString()} Hz`),
-      sum.profileLabel && h('span', { class: 'chip' }, sum.profileLabel),
-      b && h('span', { class: 'chip', title: '배터리' },
-        h('span', { class: 'battery' + (b.percent <= 20 ? ' low' : '') }, h('i', { style: `width:${Math.min(100, b.percent)}%` })),
-        `${b.percent}%${b.charging ? ' ⚡' : ''}`),
-    ];
-  }
-
-  const MOUSE_ART = '<svg class="device-art" viewBox="0 0 200 300" aria-hidden="true">'
-    + '<defs><linearGradient id="art-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cc9ff"/><stop offset="1" stop-color="#8b7bff"/></linearGradient></defs>'
-    + '<rect x="32" y="14" width="136" height="272" rx="68" class="art-body"/>'
-    + '<path d="M100 14v114M32 128h136" class="art-line"/>'
-    + '<rect x="90" y="44" width="20" height="52" rx="10" class="art-wheel"/>'
-    + '<rect x="16" y="132" width="16" height="40" rx="7" class="art-side"/><rect x="16" y="178" width="16" height="40" rx="7" class="art-side"/>'
-    + '<path d="M72 236h56" class="art-glow"/></svg>';
-
-  // 홈: 연결된 기기 카드와 "다른 기기 연결" 카드.
-  function renderHome() {
-    const root = $('#home-devices');
-    if (!st.desc && !externalUi()) return root.replaceChildren();
-    const sum = deviceSummary();
-    const art = h('div', { class: 'device-art-wrap' });
-    art.innerHTML = MOUSE_ART;
-    const photo = OMM.deviceImage?.(sum.name);
-    if (photo) {
-      const img = h('img', { src: photo.image, alt: `${sum.name} 공식 제품 사진`, class: 'device-photo',
-        referrerpolicy: 'no-referrer', onerror: () => { art.innerHTML = MOUSE_ART; } });
-      art.replaceChildren(img);
-    }
-    root.replaceChildren(
-      h('article', { class: 'device-card' },
-        h('div', { class: 'device-card-head' },
-          h('div', null, h('h3', null, sum.name), h('p', { class: 'hint' }, sum.modeText)),
-          h('span', { class: 'chip ok' }, '연결됨')),
-        art,
-        h('div', { class: 'device-chips' }, statusChips()),
-        h('button', { class: 'primary', onclick: () => setView('config') }, '설정 열기')),
-      h('article', { class: 'device-card add' },
-        h('h3', null, '다른 기기 연결'),
-        h('p', { class: 'hint' }, '한 번에 한 기기만 연결됩니다. 새 기기를 고르면 지금 기기와의 연결은 끊어집니다.'),
-        h('button', { onclick: requestConnect }, '+ 기기 선택')));
-  }
-
-  function render() {
-    const connected = !!st.desc || !!externalUi();
-    $('#home-hero').hidden = connected;
-    $('#home-devices').hidden = !connected;
-    $('#config-empty').hidden = connected;
-    $('#workspace').hidden = !connected;
-    $('#actionbar').hidden = !connected;
-    $('#btn-disconnect').hidden = !connected;
-    renderDeviceBar();
-    renderHome();
-    if (!connected) return;
-    // 백업·진단은 Logitech 온보드 프로필 전용이다.
-    $('#sidebar').hidden = false;
-    for (const id of ['#btn-export', '#btn-import']) $(id).hidden = !!externalUi();
-    if (externalUi()) {
-      $('#sidebar').hidden = !externalUi().renderProfiles($('#sidebar'));
-      externalUi().render($('#editor'));
-      renderActionBar();
-      return;
-    }
-    renderSidebar();
-    renderEditor();
-    renderActionBar();
-  }
-
-  function renderDeviceBar() {
-    const bar = $('#device');
-    if (externalUi()) return bar.replaceChildren(h('strong', null, deviceSummary().name), ...statusChips().filter(Boolean));
-    if (!st.desc) return bar.replaceChildren();
-    bar.replaceChildren(
-      h('strong', null, st.name),
-      ...statusChips().filter(Boolean),
-      h('label', { class: 'chip' }, '모드 ',
-        h('select', { onchange: (e) => setMode(Number(e.target.value)) },
-          h('option', { value: OMM.MODE.ONBOARD, selected: st.mode === OMM.MODE.ONBOARD }, '온보드 메모리'),
-          h('option', { value: OMM.MODE.HOST, selected: st.mode !== OMM.MODE.ONBOARD }, '호스트(소프트웨어)'))),
-    );
-  }
-
-  function renderSidebar() {
-    if (!st.desc) return;
-    const romActive = st.current >= ROM_BASE;
-    $('#sidebar').replaceChildren(
-      h('h2', null, '프로필'),
-      ...st.profiles.map((p) => h('div', {
-        class: 'profile' + (p.index === st.selected ? ' selected' : '') + (p.enabled ? '' : ' off'),
-        onclick: () => { st.selected = p.index; render(); },
-      },
-        h('div', { class: 'profile-main' },
-          h('span', { class: 'profile-name' }, profileTitle(p), isDirty(p) && h('span', { class: 'dot', title: '저장되지 않은 변경' })),
-          h('span', { class: 'profile-sub' },
-            !p.raw ? '읽을 수 없음' : [
-              isCurrent(p) ? (romActive ? '사용 중 (ROM)' : '사용 중') : p.enabled ? '사용' : '사용 안 함',
-              p.source === 'rom' ? ' · 초기값' : '',
-            ].join(''))),
-        h('input', {
-          type: 'checkbox', class: 'switch', title: '프로필 사용', checked: p.enabled, disabled: !p.raw || !canEdit(),
-          onclick: (e) => e.stopPropagation(),
-          onchange: (e) => { p.enabled = e.target.checked; render(); },
-        }))),
-    );
-  }
-
-  function renderActionBar() {
-    if (externalUi()) {
-      const dirty = externalUi().isDirty();
-      $('#dirty-count').textContent = dirty ? '저장되지 않은 변경이 있습니다' : '변경 사항 없음';
-      $('#btn-save').disabled = !dirty || (externalUi().canEdit && !externalUi().canEdit());
-      $('#btn-revert').disabled = !dirty;
-      return;
-    }
-    const n = st.profiles.filter(isDirty).length;
-    $('#dirty-count').textContent = n ? `저장되지 않은 변경: 프로필 ${n}개` : '변경 사항 없음';
-    $('#btn-save').disabled = !n || !canEdit();
-    $('#btn-revert').disabled = !n;
-    $('#btn-import').disabled = !canEdit();
-  }
-
-  // 편집으로 값이 바뀐 뒤 호출. 포커스를 잃지 않도록 편집 영역은 필요할 때만 다시 그린다.
-  function touched(rerenderEditor) {
-    renderSidebar();
-    renderActionBar();
-    if (rerenderEditor) renderEditor();
-  }
-
-  function renderEditor() {
-    const p = st.profiles[st.selected];
-    const root = $('#editor');
-    const notices = [];
-    if (!st.crcTrusted) {
-      notices.push('기기에서 체크섬이 맞는 프로필을 하나도 읽지 못했습니다. 안전을 위해 편집과 저장을 막았습니다.');
-    } else if (!layoutKnown()) {
-      notices.push(`이 기기의 프로필 형식(${st.desc.profileFormatId})은 알려진 어떤 구조로도 해석되지 않아 편집할 수 없습니다.`);
-    } else if (!formatVerified()) {
-      notices.push(h('label', null,
-        h('input', { type: 'checkbox', checked: st.unlock, onchange: (e) => { st.unlock = e.target.checked; render(); } }),
-        ` 이 기기의 프로필 형식(${st.desc.profileFormatId})은 실제 기기로 확인하지 못했습니다. 값이 잘못 해석될 수 있음을 이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.`));
-    }
-    if (st.mode !== OMM.MODE.ONBOARD) {
-      notices.push('기기가 호스트 모드입니다. 온보드 프로필은 온보드 메모리 모드에서만 적용됩니다. G HUB가 실행 중이면 기기를 호스트 모드로 되돌리니 먼저 종료하세요.');
-    }
-
-    const hasAnalog = layoutKnown() && st.layout.analog !== null;
-    const tabs = [['overview', '개요'], ['dpi', '성능'], ['buttons', '버튼'], hasAnalog && ['analog', 'HITS 구성'], ['info', '고급']].filter(Boolean);
-    if (st.tab === 'analog' && !hasAnalog) st.tab = 'overview';
-    const body = st.tab === 'info' ? renderInfo(p)
-      : !p.raw ? h('p', { class: 'empty' }, '이 프로필은 기기에서 읽을 수 없습니다.')
-      : !layoutKnown() ? h('p', { class: 'empty' }, '알 수 없는 프로필 형식입니다.')
-      : st.tab === 'overview' ? renderOverview(p)
-      : st.tab === 'dpi' ? renderDpi(p) : st.tab === 'analog' ? renderAnalog(p) : renderButtons(p);
-
-    root.replaceChildren(
-      ...notices.map((n) => h('div', { class: 'notice' }, n)),
-      h('div', { class: 'editor-head' },
-        h('h2', null, profileTitle(p)),
-        // 기기에 저장된 상태 그대로인 프로필만 바로 전환할 수 있다.
-        p.raw && !isCurrent(p) && p.origEnabled && !isDirty(p) && st.mode === OMM.MODE.ONBOARD
-          && h('button', { onclick: () => activate(p) }, '이 프로필로 전환')),
-      h('nav', { class: 'tabs' }, tabs.map(([id, label]) => h('button', {
-        class: id === st.tab ? 'active' : '', onclick: () => { st.tab = id; renderEditor(); },
-      }, label))),
-      h('div', { class: 'panel' }, body),
-    );
-  }
-
-  // 기기가 지원하는 DPI 값으로 맞춘다. 구간마다 간격이 다를 수 있다.
-  function snapDpi(v) {
-    const { min, max, step, segments } = st.dpiRange;
-    v = Math.min(max, Math.max(min, v));
-    const seg = (segments || []).find((s) => v <= s.to);
-    return seg ? Math.min(seg.to, seg.from + Math.round((v - seg.from) / seg.step) * seg.step)
-      : Math.min(max, Math.round((v - min) / step) * step + min);
-  }
-
-  // 보고율 바이트마다 선택 상자를 하나씩 만든다 (확장 구조는 무선/유선이 따로 있다).
-  // 개요: 프로필 이름과, 지금 편집 중인 값의 요약.
-  function renderOverview(p) {
-    const ro = !canEdit();
-    const L = st.layout;
-    const m = P.parse(p.raw, L);
-    const stages = m.dpi.filter(Boolean);
-    const def = m.dpi[m.defaultDpi] || stages[0];
-    const r = m.reportRates[0];
-    const rate = !L.reportRate.length ? null : L.rateUnit === 'ms' ? (r ? Math.round(1000 / r) : null) : 125 << r;
-    const tile = (label, value, sub) => h('div', { class: 'stat' }, h('small', null, label), h('b', null, value), sub && h('span', null, sub));
-    return h('div', null,
-      L.name !== null && h('div', { class: 'field' },
-        h('label', null, '프로필 이름'),
-        h('input', {
-          type: 'text', maxlength: P.NAME_CHARS, value: m.name, placeholder: `프로필 ${p.index + 1}`, disabled: ro,
-          oninput: (e) => { P.setName(p.raw, L, e.target.value); touched(false); },
-          onchange: () => renderEditor(),
-        })),
-      h('div', { class: 'stat-grid' },
-        tile('기본 DPI', def ? def.x.toLocaleString() : '–', `${stages.length}단계 중`),
-        tile('보고율', rate ? `${rate.toLocaleString()} Hz` : '–', L.reportRate[0] && L.reportRate[0].label),
-        tile('버튼', String(Math.min(st.desc.buttonCount, L.maxButtons)), st.desc.hasGShift ? 'G-Shift 지원' : null),
-        tile('상태', isCurrent(p) ? '사용 중' : p.enabled ? '사용' : '사용 안 함', p.source === 'rom' ? '초기값' : null)),
-      h('p', { class: 'hint' }, '값을 바꾸려면 위의 「성능」과 「버튼」 탭을 여세요. 변경 내용은 「기기에 저장」을 누르기 전까지 기기에 기록되지 않습니다.'));
-  }
-
-  // 보고율 바이트마다 버튼 묶음을 하나씩 만든다 (확장 구조는 무선/유선이 따로 있다).
-  function reportRateFields(p, m, ro) {
-    const L = st.layout;
-    const base = L.rateUnit === 'ms' ? [[8, '125'], [4, '250'], [2, '500'], [1, '1K']]
-      : (st.rateIndexes || EXTENDED_RATE_INDEXES).map((i) => [i, formatHz(125 << i)]);
-    return L.reportRate.map((r, index) => {
-      const cur = m.reportRates[index];
-      const options = base.some(([v]) => v === cur) ? base : [...base, [cur, `기타 (${cur})`]];
-      const label = r.label ? `보고율 · ${r.label}` : '보고율';
-      return h('div', { class: 'field' },
-        h('label', null, label, h('small', null, 'Hz')),
-        choice(label, options, cur, ro, (v) => { P.setReportRate(p.raw, L, index, v); touched(true); }));
+  });
+  if (supported) {
+    navigator.hid.addEventListener('disconnect', async (e) => {
+      if (!UIS.some((ui) => ui.ownsDevice(e.device))) return;
+      await disconnect();
+      render();
+      toast(t('기기 연결이 끊어졌습니다.'), 'error');
     });
   }
+  window.addEventListener('beforeunload', (e) => {
+    if (active()?.isDirty()) e.preventDefault();
+  });
+  translateDom();
+  renderLangPicker();
+  renderCatalog();
+  tester.init(setView);
+  setView(view);
+  render();
+}
 
-  // 버니합(BHOP) 시간. 저장 값은 ms / 10이고 0은 끔. G HUB에서는 100~1000 ms 범위다.
-  function bunnyHopField(p, m, ro) {
-    const options = [[0, '끔'], ...BUNNY_HOP_MS.map((ms) => [ms / 10, String(ms)])];
-    if (!options.some(([v]) => v === m.bunnyHop)) {
-      options.unshift([m.bunnyHop, m.bunnyHop === 0xff ? '설정 안 됨' : `기타 (${m.bunnyHop * 10})`]);
-    }
-    return [
-      h('div', { class: 'field' },
-        h('label', null, '버니합 (BHOP)', h('small', null, 'ms')),
-        choice('버니합', options, m.bunnyHop, ro, (v) => { P.setBunnyHop(p.raw, st.layout, v); touched(true); })),
-      h('p', { class: 'hint field-desc' }, '휠 스크롤에 점프를 할당해 쓰는 게임을 위한 휠 설정입니다. 의도하지 않은 휠 움직임 때문에 점프가 엉뚱한 타이밍에 입력되는 것을 줄여 줍니다. 휠로 점프하지 않는다면 「끔」으로 두면 됩니다.'),
-    ];
-  }
-
-  function renderDpi(p) {
-    const ro = !canEdit();
-    const L = st.layout;
-    const { min, max, step } = st.dpiRange;
-    const m = P.parse(p.raw, L);
-    const slots = m.dpi.map((entry, slot) => ({ entry, slot })).filter((s) => s.entry);
-    const stages = slots.map((s) => ({ ...s.entry }));
-    let def = Math.max(0, slots.findIndex((s) => s.slot === m.defaultDpi));
-    let shift = Math.max(0, slots.findIndex((s) => s.slot === m.shiftDpi));
-    const commit = (rerender) => { P.setDpi(p.raw, L, stages, def, shift); touched(rerender); };
-    const setStage = (i, v) => { stages[i].x = stages[i].y = v; };
-
-    const rows = stages.map((stage, i) => {
-      const number = h('input', {
-        type: 'number', min, max, step, value: stage.x, disabled: ro,
-        onchange: (e) => { setStage(i, snapDpi(Number(e.target.value) || min)); commit(true); },
-      });
-      return h('div', { class: 'dpi-row' },
-        h('span', { class: 'dpi-idx' }, `${i + 1}단계`),
-        h('input', {
-          type: 'range', min, max, step, value: stage.x, disabled: ro,
-          oninput: (e) => { setStage(i, snapDpi(Number(e.target.value))); number.value = stages[i].x; commit(false); },
-        }),
-        number,
-        h('label', null, h('input', { type: 'radio', name: 'dpi-def', checked: i === def, disabled: ro, onchange: () => { def = i; commit(false); } }), ' 기본'),
-        h('label', null, h('input', { type: 'radio', name: 'dpi-shift', checked: i === shift, disabled: ro, onchange: () => { shift = i; commit(false); } }), ' 시프트'),
-        L.lodEditable && h('span', { class: 'lod' }, h('small', null, 'LOD'),
-          choice('리프트오프 거리', LOD_LEVELS.some(([v]) => v === stage.lod) ? LOD_LEVELS : [...LOD_LEVELS, [stage.lod, `기타 (${stage.lod})`]],
-            stage.lod, ro, (v) => { stages[i].lod = v; commit(true); }, 'small')),
-        h('button', {
-          class: 'ghost', title: '단계 삭제', disabled: ro || stages.length <= 1,
-          onclick: () => {
-            stages.splice(i, 1);
-            const fix = (idx) => (idx === i ? 0 : idx > i ? idx - 1 : idx);
-            def = fix(def);
-            shift = fix(shift);
-            commit(true);
-          },
-        }, '✕'));
-    });
-
-    return h('div', null,
-      reportRateFields(p, m, ro),
-      m.bunnyHop !== null && bunnyHopField(p, m, ro),
-      h('h3', null, `DPI 단계 (${min.toLocaleString()}~${max.toLocaleString()})`),
-      rows,
-      h('button', {
-        disabled: ro || stages.length >= P.DPI_SLOTS,
-        onclick: () => { stages.push({ ...stages[stages.length - 1] }); commit(true); },
-      }, '+ 단계 추가'),
-      h('p', { class: 'hint' }, '시프트: 「DPI 시프트」 버튼을 누르고 있는 동안 적용되는 단계입니다.'),
-      (L.dpiEntrySize === 5 || L.dpiY !== null) && h('p', { class: 'hint' }, '가로·세로 DPI는 같은 값으로 설정됩니다.'
-        + (L.lodEditable ? ' LOD는 마우스를 들어 올렸을 때 추적이 멈추는 높이(리프트오프 거리)입니다.'
-          : L.dpiEntrySize === 5 ? ' 리프트오프 거리는 이 프로필 형식에서 지원 단계가 확인되지 않아 기존 값을 유지합니다.' : '')),
-      !L.reportRate.length && h('p', { class: 'hint' }, '이 프로필 형식의 보고율은 값의 표현이 확인되지 않아 편집하지 않습니다.'));
-  }
-
-  function renderButtons(p) {
-    const ro = !canEdit();
-    const L = st.layout;
-    const hasGShift = st.desc.hasGShift;
-    const layer = hasGShift ? st.layer : 'buttons';
-    const count = Math.min(st.desc.buttonCount, layer === 'gshift' ? L.maxGShift : L.maxButtons);
-
-    const row = (i) => {
-      const bytes = P.getBinding(p.raw, L, layer, i);
-      const a = P.decodeBinding(bytes);
-      const apply = (action) => { P.setBinding(p.raw, L, layer, i, P.encodeBinding(action)); touched(true); };
-      const editable = ['mouse', 'key', 'consumer', 'special', 'disabled'];
-      const kinds = [['mouse', '마우스 버튼'], ['key', '키보드'], ['consumer', '미디어'], ['special', '특수 기능'], ['disabled', '사용 안 함']];
-      if (!editable.includes(a.kind)) kinds.push([a.kind, a.kind === 'macro' ? '매크로 (편집 불가)' : '기타 (편집 불가)']);
-      const defaults = {
-        mouse: { kind: 'mouse', mask: 1 }, key: { kind: 'key', mods: 0, usage: 0 },
-        consumer: { kind: 'consumer', usage: 0xcd }, special: { kind: 'special', code: 0x05 }, disabled: { kind: 'disabled' },
-      };
-
-      let detail = null;
-      if (a.kind === 'mouse') {
-        const bit = Math.max(0, Math.log2(a.mask & -a.mask) | 0);
-        detail = h('select', { disabled: ro, onchange: (e) => apply({ kind: 'mouse', mask: 1 << Number(e.target.value) }) },
-          [...Array(16).keys()].map((b) => h('option', { value: b, selected: b === bit }, K.mouseButtonName(b))));
-      } else if (a.kind === 'special' || a.kind === 'consumer') {
-        const table = a.kind === 'special' ? K.SPECIALS : K.CONSUMER;
-        const cur = a.kind === 'special' ? a.code : a.usage;
-        const codes = Object.keys(table).map(Number);
-        if (!codes.includes(cur)) codes.push(cur);
-        detail = h('select', {
-          disabled: ro,
-          onchange: (e) => apply(a.kind === 'special' ? { kind: 'special', code: Number(e.target.value) } : { kind: 'consumer', usage: Number(e.target.value) }),
-        }, codes.map((c) => h('option', { value: c, selected: c === cur }, K.describe(a.kind === 'special' ? { kind: 'special', code: c } : { kind: 'consumer', usage: c }))));
-      } else if (a.kind === 'key') {
-        const keyLabel = a.usage ? K.keyName(0, a.usage) : '키 지정';
-        detail =h('span', { class: 'key-edit' },
-          K.MODIFIERS.map(([bit, name]) => h('label', null,
-            h('input', {
-              type: 'checkbox', checked: !!(a.mods & (bit | (bit << 4))), disabled: ro,
-              onchange: (e) => apply({ kind: 'key', usage: a.usage, mods: e.target.checked ? a.mods | bit : a.mods & ~(bit | (bit << 4)) }),
-            }), ' ' + name)),
-          h('button', {
-            disabled: ro, class: 'capture',
-            onclick: (e) => { e.target.textContent = '키를 누르세요…'; e.target.classList.add('armed'); },
-            onblur: (e) => { e.target.textContent = keyLabel; e.target.classList.remove('armed'); },
-            onkeydown: (e) => {
-              if (!e.target.classList.contains('armed')) return;
-              e.preventDefault();
-              if (K.MODIFIER_CODES.includes(e.code)) return;
-              const usage = K.CODE_TO_USAGE[e.code];
-              if (!usage) return toast(`지원하지 않는 키입니다: ${e.code}`, 'error');
-              const mods = (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
-              apply({ kind: 'key', mods, usage });
-            },
-          }, keyLabel));
-      }
-
-      return h('tr', null,
-        h('td', { class: 'btn-idx' }, `버튼 ${i + 1}`),
-        h('td', { class: 'btn-desc' }, K.describe(a, bytes)),
-        h('td', null, h('select', { disabled: ro, onchange: (e) => apply(defaults[e.target.value]) },
-          kinds.map(([kind, label]) => h('option', { value: kind, selected: kind === a.kind, disabled: !editable.includes(kind) }, label)))),
-        h('td', null, detail));
-    };
-
-    return h('div', null,
-      hasGShift && h('div', { class: 'segmented' },
-        [['buttons', '기본'], ['gshift', 'G-Shift']].map(([id, label]) => h('button', {
-          class: id === layer ? 'active' : '', onclick: () => { st.layer = id; renderEditor(); },
-        }, label))),
-      h('table', { class: 'buttons' },
-        h('thead', null, h('tr', null, ['버튼', '현재 동작', '종류', '설정'].map((t) => h('th', null, t)))),
-        h('tbody', null, [...Array(count).keys()].map(row))),
-      h('p', { class: 'hint' }, '버튼 번호는 기기 내부 순서입니다. 보통 1=왼쪽, 2=오른쪽, 3=휠 클릭 순이며 나머지는 기기마다 다릅니다.'));
-  }
-
-  // 아날로그 버튼(작동점, 래피드 트리거, 클릭 햅틱). 허용 범위는 기기가 알려 주는 단계 수를 따르고
-  // (공식 OMM 기준 작동점 1~단계 수, 래피드 트리거 1~단계 수, 햅틱 0~단계 수), 읽지 못하면 기본 범위를 쓴다.
-  function renderAnalog(p) {
-    const caps = st.analogCaps || DEFAULT_ANALOG_CAPS;
-    const ro = !canEdit();
-    const L = st.layout;
-    // 설정 한 줄: 이름과 설명, 현재 값, 그 아래 슬라이더와 양 끝 눈금.
-    const setting = (title, desc, value, min, max, disabled, onInput) => {
-      const out = h('output', null, String(value));
-      // 저장된 값이 범위를 벗어나 있어도 그대로 보여 준다.
-      const lo = Math.min(min, value);
-      const hi = Math.max(max, value);
-      return h('div', { class: 'hits-setting' + (disabled ? ' disabled' : '') },
-        h('div', { class: 'hits-head' },
-          h('div', null, h('div', { class: 'hits-title' }, title), h('div', { class: 'hits-desc' }, desc)),
-          out),
-        h('input', {
-          type: 'range', min: lo, max: hi, step: 1, value, disabled, 'aria-label': title,
-          oninput: (e) => { out.textContent = e.target.value; onInput(Number(e.target.value)); touched(false); },
-        }),
-        h('div', { class: 'hits-scale' }, h('span', null, String(lo)), h('span', null, String(hi))));
-    };
-    const cards = [...Array(L.analog.count).keys()].map((i) => {
-      const a = P.getAnalog(p.raw, L, i);
-      const set = (patch) => P.setAnalog(p.raw, L, i, Object.assign(a, patch));
-      return h('section', { class: 'hits-card' },
-        h('h3', null, `버튼 ${i + 1}`, ANALOG_BUTTON_NAMES[i] && h('span', null, ANALOG_BUTTON_NAMES[i])),
-        setting('작동점', '클릭이 입력되는 깊이', a.actuation, 1, caps.actuationMax, ro, (v) => set({ actuation: v })),
-        h('label', { class: 'hits-toggle' },
-          h('div', null, h('div', { class: 'hits-title' }, '래피드 트리거'), h('div', { class: 'hits-desc' }, '버튼을 떼기 시작하면 바로 입력 해제')),
-          h('input', { type: 'checkbox', class: 'switch', checked: a.rtEnabled, disabled: ro, onchange: (e) => { set({ rtEnabled: e.target.checked }); touched(true); } })),
-        setting('래피드 트리거 민감도', a.rtEnabled ? '입력 해제·재입력에 필요한 이동 거리' : '래피드 트리거를 켜면 조절할 수 있습니다',
-          a.rtSensitivity, 1, caps.rtMax, ro || !a.rtEnabled, (v) => set({ rtSensitivity: v })),
-        setting('클릭 햅틱 강도', '클릭할 때의 진동 세기 (0은 끔)', a.haptic, 0, caps.hapticMax, ro, (v) => set({ haptic: v })));
-    });
-    return h('div', null,
-      h('div', { class: 'hits-grid' }, cards),
-      h('p', { class: 'hint' }, '일반적으로 버튼 1이 좌클릭, 버튼 2가 우클릭입니다. ' + (st.analogCaps
-        ? '범위는 기기가 알려 준 단계 수입니다.'
-        : '기기에서 범위를 읽지 못해 기본 범위(PRO X2 SUPERSTRIKE 기준)를 적용했습니다.')));
-  }
-
-  function renderInfo(p) {
-    const d = st.desc;
-    const rows = [
-      ['기기', st.name],
-      ['프로필 형식', `${d.profileFormatId} · ${!layoutKnown() ? '알 수 없는 구조' : LAYOUT_NAMES[st.layout.id]}${formatVerified() ? '' : ' (미검증)'}`],
-      ['메모리 모델 / 매크로 형식', `${d.memoryModelId} / ${d.macroFormatId}`],
-      ['프로필 수 (초기 활성)', `${d.profileCount} (${d.profileCountOob})`],
-      ['버튼 수', d.buttonCount],
-      ['섹터', `${d.sectorCount}개 × ${d.sectorSize}바이트`],
-      ['G-Shift / DPI 시프트', `${d.hasGShift ? '지원' : '미지원'} / ${d.hasDpiShift ? '지원' : '미지원'}`],
-      ['프로필 목록(디렉터리)', st.dirValid ? '정상' : '비어 있음 (ROM 프로필 사용 중)'],
-      ['선택한 프로필 위치', `섹터 0x${p.sector.toString(16).padStart(4, '0')} (${p.source === 'rom' ? 'ROM' : '사용자 영역'})`],
-    ];
-    return h('table', { class: 'info' }, rows.map(([k, v]) => h('tr', null, h('th', null, k), h('td', null, String(v)))));
-  }
-
-  // ---------- 초기화 ----------
-
-  function init() {
-    const supported = 'hid' in navigator;
-    $('#unsupported').hidden = supported;
-    for (const btn of document.querySelectorAll('.btn-connect')) {
-      btn.disabled = !supported;
-      btn.addEventListener('click', requestConnect);
-    }
-    for (const btn of document.querySelectorAll('#views button')) btn.addEventListener('click', () => setView(btn.dataset.view));
-    setView(st.view);
-    $('#btn-disconnect').addEventListener('click', async () => { await disconnect(); render(); });
-    $('#btn-save').addEventListener('click', () => (externalUi() ? externalUi().save() : save()));
-    $('#btn-revert').addEventListener('click', () => (externalUi() ? externalUi().revert() : revert()));
-    $('#btn-export').addEventListener('click', exportBackup);
-    $('#btn-diagnostics').addEventListener('click', () => (externalUi() ? externalUi().exportDiagnostics() : exportDiagnostics()));
-    $('#btn-import').addEventListener('click', () => $('#import-file').click());
-    $('#import-file').addEventListener('change', (e) => {
-      if (e.target.files[0]) importBackup(e.target.files[0]);
-      e.target.value = '';
-    });
-    if (supported) {
-      navigator.hid.addEventListener('disconnect', async (e) => {
-        const ours = (st.transport && st.transport.devices && st.transport.devices.includes(e.device))
-          || (OMM.compxUi && OMM.compxUi.ownsDevice(e.device))
-          || (OMM.mchoseUi && OMM.mchoseUi.ownsDevice(e.device));
-        if (!ours) return;
-        await disconnect();
-        render();
-        toast('기기 연결이 끊어졌습니다.', 'error');
-      });
-    }
-    window.addEventListener('beforeunload', (e) => {
-      if (st.profiles.some(isDirty) || (externalUi() && externalUi().isDirty())) e.preventDefault();
-    });
-    render();
-  }
-
-  // 개발용: 콘솔에서 js/mock.js의 가상 기기를 OMM.connect(new OMM.MockTransport())로 연결할 수 있다.
-  OMM.h = h;
-  OMM.setView = setView;
-  OMM.ui = { h, choice, toast, busy, ask, download, refresh: render, refreshActions: renderActionBar };
-  OMM.connectCompx = connectCompx;
-  OMM.connectMchose = connectMchose;
-  OMM.state = st;
-  OMM.connect = connect;
-  init();
-})(window.OMM);
+// 개발·테스트용 손잡이: 콘솔과 tests/browser.mjs가 쓴다.
+window.OMM = {
+  state: app, compx: C, logitech, compxUi, mchoseUi, tester, ui: { refresh: render },
+  connect: (transport) => connectWith(logitech, transport, t('기기 검색 중…')),
+  connectCompx: (devices) => connectWith(compxUi, devices, t('기기 읽는 중…')),
+  connectMchose: (devices) => connectWith(mchoseUi, devices, t('MCHOSE 기기 읽는 중…')),
+  connectDemo, setLang,
+};
+init();

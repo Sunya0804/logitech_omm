@@ -1,0 +1,20 @@
+# 푸시와 풀 리퀘스트마다 단위 테스트와 가상 기기 브라우저 테스트를 돌린다.
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # GitHub의 Ubuntu 실행 환경에는 Chrome이 설치돼 있다.
+      - run: echo "CHROME_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+      - run: npm test

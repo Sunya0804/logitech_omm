@@ -1,3 +1,5 @@
 # 분석용으로 받아 둔 설치 파일 등
 *.exe
 .local-tools/
+
+node_modules/
