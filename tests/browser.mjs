@@ -59,6 +59,61 @@ try {
   await page.evaluate(async () => { const { MockTransport } = await import('/js/mock.js'); await OMM.connect(new MockTransport()); });
   assert.equal(await page.evaluate(() => OMM.mchoseUi.connected()), false);
   assert.equal(await page.locator('#btn-export').isVisible(), true);
+
+  // Logitech 매크로: 기존 매크로 표시, 녹화로 이어 붙이기, 빈 섹터에 기록하고 버튼이 그 섹터를 가리키는지
+  await page.evaluate(async () => { const { MockTransport } = await import('/js/mock.js'); window.lt = new MockTransport('classic'); await OMM.connect(lt); });
+  await page.getByRole('tab', { name: '버튼', exact: true }).click();
+  const macroRow = page.locator('table.buttons tbody tr').nth(10);
+  assert.match(await macroRow.locator('.btn-desc').innerText(), /매크로: Ctrl → C/);
+  await macroRow.getByRole('button', { name: '매크로 편집' }).click();
+  assert.equal(await page.locator('.macro-steps li').count(), 5);
+  await page.locator('#macro-record').click();
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Shift');
+  assert.match(await page.locator('#macro-record').innerText(), /녹화 중지 \(4\)/);
+  await page.locator('#macro-record').click();
+  const steps = await page.evaluate(() => [...document.querySelectorAll('.macro-steps li')].map((li) => li.textContent));
+  assert.ok(steps.some((s) => /↓ Shift/.test(s)) && steps.some((s) => /↑ A/.test(s)), steps.join(' | '));
+  await shot('logitech-macro.png');
+  assert.equal(await page.evaluate(() => OMM.logitech.isDirty()), true);
+  // 다른 버튼을 빈 매크로로 바꾸면 저장을 막는다
+  await page.locator('table.buttons tbody tr').nth(9).locator('select').first().selectOption('macro');
+  await page.locator('#btn-save').click();
+  assert.match(await page.evaluate(() => toastLog.join(' ')), /비어 있는 매크로/);
+  await page.locator('table.buttons tbody tr').nth(9).locator('select').first().selectOption('disabled');
+  await page.locator('#btn-save').click();
+  assert.match(await page.locator('#confirm-body').innerText(), /실제 기기로 확인하지 않은/);
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy && !OMM.logitech.isDirty());
+  const saved = await page.evaluate(async () => {
+    const M = await import('/js/macro.js');
+    const P = await import('/js/profile.js');
+    const read = (n) => lt.sectors.get(n) ?? null;
+    const binding = [...P.getBinding(lt.sectors.get(1), P.LAYOUTS.classic, 'buttons', 10)];
+    return { binding, macro: M.readMacro(read, M.macroTarget(binding), 255), oldKept: M.readMacro(read, { sector: 5, offset: 0 }, 255).steps.length,
+      button10: [...P.getBinding(lt.sectors.get(1), P.LAYOUTS.classic, 'buttons', 9)] };
+  });
+  assert.deepEqual(saved.binding, [0x00, 4, 0x00, 0x00]);
+  assert.equal(saved.macro.error, null);
+  assert.deepEqual(saved.macro.steps.slice(0, 5).map((s) => s.kind), ['key', 'key', 'delay', 'key', 'key']);
+  assert.ok(saved.macro.steps.some((s) => s.kind === 'key' && s.down && s.usage === 0x04));
+  assert.equal(saved.oldKept, 5);
+  assert.deepEqual(saved.button10, [0xff, 0xff, 0xff, 0xff]);
+  assert.match(await macroRow.locator('.btn-desc').innerText(), /Shift → A/);
+  assert.doesNotMatch(await macroRow.locator('.btn-desc').innerText(), /저장 전/);
+  // 백업에는 매크로 단계가 들어가고, 불러오면 저장 전 편집본이 된다(같은 내용이면 편집본을 만들지 않는다)
+  const backup = await page.evaluate(async () => {
+    let captured;
+    const orig = URL.createObjectURL;
+    URL.createObjectURL = (blob) => { captured = blob; return orig.call(URL, blob); };
+    OMM.logitech.exportBackup();
+    URL.createObjectURL = orig;
+    return JSON.parse(await captured.text());
+  });
+  assert.deepEqual(backup.macros.map((m) => [m.index, m.layer, m.button]), [[0, 'buttons', 10]]);
+  await page.evaluate(async (b) => { await OMM.logitech.importBackup(new File([JSON.stringify(b)], 'b.json')); }, backup);
+  assert.equal(await page.evaluate(() => OMM.logitech.isDirty()), false);
   await page.evaluate(async () => { ({ MockCompxDevice: window.MockCompxDevice } = await import('/js/mock-compx.js')); await OMM.connectCompx([new MockCompxDevice()]); });
   assert.equal(await page.evaluate(() => OMM.compxUi.connected()), true);
   assert.equal(await page.locator('#sidebar .profile').count(), 4);

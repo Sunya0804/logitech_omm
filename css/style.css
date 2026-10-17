@@ -524,3 +524,14 @@ button.profile { width: 100%; text-align: left; white-space: normal; }
 .lang-picker select { flex: 1; min-width: 0; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 main:focus { outline: none; }
+
+/* ---------- Logitech 매크로 편집 ---------- */
+
+.macro-editor { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.macro-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.macro-head h3 { margin: 0 0 8px; }
+.macro-steps { margin: 8px 0; padding-left: 28px; max-height: 320px; overflow-y: auto; }
+.macro-steps li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-top: 1px solid var(--border); }
+.macro-steps li:first-child { border-top: 0; }
+.macro-steps input[type=number] { width: 90px; }
+.macro-editor .row-actions { flex-wrap: wrap; }

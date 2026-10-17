@@ -180,7 +180,7 @@ function decodeBinding(b) {
   }
   if (b[0] === 0x90) return { kind: 'special', code: b[1] };
   if (b[0] === 0xff) return { kind: 'disabled' };
-  if (b[0] === 0x00) return { kind: 'macro' };
+  if (b[0] === 0x00) return { kind: 'macro', sector: b[1], offset: b[3] }; // 매크로 위치 (js/macro.js)
   return { kind: 'raw' };
 }
 
@@ -191,6 +191,7 @@ function encodeBinding(a) {
     case 'consumer': return [0x80, 0x03, a.usage >> 8, a.usage & 0xff];
     case 'special': return [0x90, a.code, 0x00, 0x00];
     case 'disabled': return [0xff, 0xff, 0xff, 0xff];
+    case 'macro': if (a.sector) return [0x00, a.sector, 0x00, a.offset || 0]; break;
   }
   throw new Error('인코딩할 수 없는 할당: ' + a.kind);
 }

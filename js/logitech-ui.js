@@ -2,6 +2,7 @@
 // 프로필 섹터를 읽어 사본을 고치고, 「기기에 저장」을 누르면 섹터를 쓴 뒤 다시 읽어 대조한다.
 import * as P from './profile.js';
 import * as K from './keys.js';
+import * as M from './macro.js';
 import { MODE, FEATURE, HidppError, Hidpp, OnboardProfiles, WebHidTransport } from './hidpp.js';
 import { t, num } from './i18n.js';
 import { $, h, toast, ask, busy, download, choice, tabs, tabPanel, tile, field, shell } from './ui.js';
@@ -22,6 +23,9 @@ const ROM_BASE = 0x0100;
 // 기기가 아날로그 버튼의 단계 수를 알려 주지 않을 때 쓰는 값 (PRO X2 SUPERSTRIKE의 G HUB 기준)
 const DEFAULT_ANALOG_CAPS = { actuationMax: 10, hapticMax: 5, rtMax: 5 };
 const ISSUE_URL = 'https://github.com/Sunya0804/logitech_omm/issues/new';
+// 해석할 수 있는 매크로 형식 번호 (js/macro.js)
+const MACRO_FORMAT = 1;
+const MACRO_DELAY_STEP_MS = 50;
 
 export const filters = WebHidTransport.filters;
 
@@ -31,6 +35,8 @@ const st = {
   profiles: [], dirValid: false, crcTrusted: false,
   current: 0, mode: MODE.ONBOARD,
   selected: 0, tab: 'overview', layer: 'buttons', unlock: false,
+  // macroSectors: 읽어 둔 매크로 섹터(번호 → 바이트), macroEdit: 편집 중인 매크로 {index, layer, i}, recording: 녹화 상태
+  macroSectors: new Map(), macroEdit: null, recording: null,
 };
 
 // ---------- 연결 / 읽기 ----------
@@ -62,8 +68,9 @@ export async function connect(transport, setMsg) {
 }
 
 export async function disconnect() {
+  stopRecording();
   if (st.transport) await st.transport.close().catch(() => {});
-  Object.assign(st, { transport: null, hidpp: null, op: null, desc: null, layout: null, profiles: [], selected: 0, unlock: false });
+  Object.assign(st, { transport: null, hidpp: null, op: null, desc: null, layout: null, profiles: [], selected: 0, unlock: false, macroSectors: new Map(), macroEdit: null });
 }
 
 async function loadProfiles(setMsg) {
@@ -104,15 +111,115 @@ async function loadProfiles(setMsg) {
       raw = await readValid(sector);
     }
     const enabled = entry ? entry.enabled : !dir && i < Math.max(1, d.profileCountOob);
-    profiles.push({ index: i, sector, source, raw, orig: raw && raw.slice(), enabled: !!raw && enabled, origEnabled: !!raw && enabled });
+    // pending: 저장 전인 매크로 편집본 ('층:버튼' → 단계들)
+    profiles.push({ index: i, sector, source, raw, orig: raw && raw.slice(), enabled: !!raw && enabled, origEnabled: !!raw && enabled, pending: new Map() });
   }
   st.profiles = profiles;
   const sample = profiles.find((p) => p.raw);
   st.layout = sample ? P.detectLayout(sample.raw, d.profileFormatId, d.buttonCount, st.dpiRange) : null;
+  await loadMacros(setMsg);
   st.current = await op.getCurrentProfile();
   if (st.selected >= profiles.length) st.selected = 0;
   const cur = profiles.findIndex(isCurrent);
   if (cur >= 0) st.selected = cur;
+}
+
+// ---------- 매크로 ----------
+
+const macroSupported = () => layoutKnown() && st.desc.macroFormatId === MACRO_FORMAT;
+const macroKey = (layer, i) => `${layer}:${i}`;
+const layers = () => (st.desc.hasGShift ? ['buttons', 'gshift'] : ['buttons']);
+const buttonCountOf = (layer) => Math.min(st.desc.buttonCount, layer === 'gshift' ? st.layout.maxGShift : st.layout.maxButtons);
+
+// 프로필 데이터 raw에 걸려 있는 매크로 위치들: [{layer, i, sector, offset}]
+function macroTargets(raw) {
+  const out = [];
+  if (!raw) return out;
+  for (const layer of layers()) {
+    for (let i = 0; i < buttonCountOf(layer); i++) {
+      const target = M.macroTarget(P.getBinding(raw, st.layout, layer, i));
+      if (target) out.push({ layer, i, ...target });
+    }
+  }
+  return out;
+}
+
+// 매크로가 들어갈 수 있는 섹터: 디렉터리(0)와 프로필 섹터를 뺀 사용자 영역
+const isProfileSector = (n) => n === 0 || st.profiles.some((p) => p.source === 'user' && p.sector === n) || (n >= 1 && n <= st.desc.profileCount);
+const macroSectorOk = (n) => n > 0 && n < st.desc.sectorCount && !isProfileSector(n);
+
+// 버튼 할당이 가리키는 매크로를 읽어 둔 섹터들로 해석한다.
+function storedMacro(target) {
+  if (!macroSectorOk(target.sector)) return { steps: [], sectors: [], error: 'sector', editable: false };
+  return M.readMacro((n) => (macroSectorOk(n) ? st.macroSectors.get(n) ?? null : null), target, st.desc.sectorSize);
+}
+
+// 모든 프로필의 매크로가 쓰는 섹터를 읽는다 (점프로 이어지는 섹터 포함).
+async function loadMacros(setMsg) {
+  st.macroSectors = new Map();
+  if (!macroSupported()) return;
+  const tried = new Set();
+  for (const p of st.profiles) {
+    for (const target of macroTargets(p.raw)) {
+      for (let r = storedMacro(target); r.error === 'unreadable' && !tried.has(r.missing); r = storedMacro(target)) {
+        tried.add(r.missing);
+        if (!macroSectorOk(r.missing)) break;
+        setMsg(t('매크로 읽는 중…'));
+        try {
+          st.macroSectors.set(r.missing, await st.op.readSector(r.missing, st.desc.sectorSize));
+        } catch (e) {
+          if (!(e instanceof HidppError)) throw e;
+          break;
+        }
+      }
+    }
+  }
+}
+
+// 새 매크로를 기록할 빈 섹터 count개. 어느 프로필(저장 전·후 모두)도 쓰지 않고 내용이 모두 0xFF인 섹터만 고른다.
+async function freeMacroSectors(count, setMsg) {
+  const used = new Set();
+  for (const p of st.profiles) {
+    for (const raw of [p.raw, p.orig]) for (const target of macroTargets(raw)) storedMacro(target).sectors.concat(target.sector).forEach((n) => used.add(n));
+  }
+  const free = [];
+  for (let n = st.desc.profileCount + 1; n < st.desc.sectorCount && free.length < count; n++) {
+    if (used.has(n) || !macroSectorOk(n)) continue;
+    setMsg(t('빈 공간 찾는 중…'));
+    const data = await st.op.readSector(n, st.desc.sectorSize).catch((e) => { if (e instanceof HidppError) return null; throw e; });
+    if (data && data.every((b) => b === 0xff)) free.push(n);
+  }
+  if (free.length < count) throw new Error(t('매크로를 기록할 빈 공간이 기기에 없습니다. 매크로 수를 줄여 보세요.'));
+  return free;
+}
+
+const sameSteps = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// 매크로 편집본을 정한다. 기기에 저장된 것과 같아지면 편집본을 지운다.
+function setPending(p, layer, i, steps) {
+  const key = macroKey(layer, i);
+  const target = M.macroTarget(P.getBinding(p.raw, st.layout, layer, i));
+  const stored = target && storedMacro(target);
+  if (stored && stored.editable && sameSteps(stored.steps, steps)) p.pending.delete(key);
+  else p.pending.set(key, steps);
+}
+
+// 버튼에 걸린 매크로의 지금 단계들 (편집본이 있으면 편집본). 해석할 수 없으면 null.
+function currentMacro(p, layer, i) {
+  const pending = p.pending.get(macroKey(layer, i));
+  if (pending) return { steps: pending, editable: true, error: null, pending: true };
+  const target = M.macroTarget(P.getBinding(p.raw, st.layout, layer, i));
+  return target ? { ...storedMacro(target), pending: false } : null;
+}
+
+function stopRecording() {
+  const rec = st.recording;
+  if (!rec) return null;
+  window.removeEventListener('keydown', rec.listener, true);
+  window.removeEventListener('keyup', rec.listener, true);
+  window.removeEventListener('blur', rec.stop);
+  st.recording = null;
+  return rec;
 }
 
 // ---------- 상태 판정 ----------
@@ -120,7 +227,7 @@ async function loadProfiles(setMsg) {
 export const connected = () => !!st.desc;
 export const ownsDevice = (device) => !!st.transport?.devices?.includes(device);
 const isCurrent = (p) => (st.current & 0xff) === p.index + 1;
-const profileDirty = (p) => !!p.raw && (!P.sameData(p.raw, p.orig) || p.enabled !== p.origEnabled);
+const profileDirty = (p) => !!p.raw && (!P.sameData(p.raw, p.orig) || p.enabled !== p.origEnabled || p.pending.size > 0);
 const needsSectorWrite = (p) => !!p.raw && (p.source !== 'user' || p.sector !== p.index + 1 || !P.sameData(p.raw, p.orig));
 const layoutKnown = () => !!st.layout;
 const formatVerified = () => layoutKnown() && DEVICE_VERIFIED_FORMATS.includes(st.desc.profileFormatId);
@@ -142,10 +249,14 @@ export async function save() {
   const dirty = st.profiles.filter(profileDirty);
   if (!dirty.length || !canEdit()) return;
   if (!st.profiles.some((p) => p.enabled)) return toast(t('최소 한 개의 프로필은 사용 상태여야 합니다.'), 'error');
+  const macros = st.profiles.flatMap((p) => [...p.pending].map(([key, steps]) => ({ p, key, steps })));
+  if (macros.some((m) => !m.steps.length)) return toast(t('비어 있는 매크로가 있습니다. 단계를 넣거나 버튼에 다른 동작을 지정하세요.'), 'error');
+  stopRecording();
   const ok = await ask(t('기기에 저장'), [
     t('{profiles}의 변경 내용을 {name}의 온보드 메모리에 씁니다.', { profiles: dirty.map(profileTitle).join(', '), name: st.name }),
     t('쓰는 동안 기기를 분리하거나 전원을 끄지 마세요. 저장 전에 「백업 내보내기」로 현재 상태를 보관해 두는 것을 권장합니다.'),
-  ], t('저장'));
+    macros.length && t('매크로 기록은 아직 실제 기기로 확인하지 않은 기능입니다. 저장한 뒤 그 버튼을 눌러 동작을 확인하고, 이상하면 버튼에 다른 동작을 지정해 저장하세요.'),
+  ].filter(Boolean), t('저장'));
   if (!ok) return;
 
   let reloadFailed = false;
@@ -158,6 +269,20 @@ export async function save() {
       const back = await op.readSector(sector, data.length);
       if (P.toHex(back) !== P.toHex(data)) throw new Error(t('{label}: 기록 후 검증에 실패했습니다. 다시 저장해 보세요.', { label }));
     };
+
+    // 매크로는 빈 섹터에 먼저 기록하고, 그다음 버튼 할당이 그 섹터를 가리키게 해 프로필과 함께 쓴다.
+    // 기존 매크로 섹터는 다른 버튼이나 프로필이 함께 쓸 수 있어 덮어쓰지 않는다.
+    if (macros.length) {
+      const free = await freeMacroSectors(macros.length, setMsg);
+      for (const [n, { p, key, steps }] of macros.entries()) {
+        const data = M.encodeMacro(steps, st.desc.sectorSize);
+        await writeVerified(free[n], data, t('매크로'));
+        st.macroSectors.set(free[n], data);
+        const [layer, i] = key.split(':');
+        P.setBinding(p.raw, st.layout, layer, Number(i), M.macroBinding(free[n]));
+        p.pending.delete(key);
+      }
+    }
 
     const sectorWrites = st.profiles.filter(needsSectorWrite);
     const dirChanged = !st.dirValid || sectorWrites.some((p) => p.source !== 'user' || p.sector !== p.index + 1)
@@ -204,9 +329,12 @@ export async function save() {
 }
 
 export function revert() {
+  stopRecording();
+  st.macroEdit = null;
   for (const p of st.profiles) {
     if (p.raw) p.raw.set(p.orig);
     p.enabled = p.origEnabled;
+    p.pending.clear();
   }
   shell.refresh();
 }
@@ -236,6 +364,13 @@ export function exportBackup() {
     type: 'omm-web-backup', version: 1, device: st.name, exportedAt: new Date().toISOString(),
     profileFormatId: desc.profileFormatId, sectorSize: desc.sectorSize,
     profiles: st.profiles.map((p) => ({ index: p.index, enabled: p.enabled, data: p.raw ? P.toHex(P.finalize(p.raw.slice())) : null })),
+    // 매크로는 기기마다 들어 있는 섹터가 달라서, 버튼별로 단계만 담는다 (한 섹터 형식, 위치 0부터).
+    macros: macroSupported() ? st.profiles.filter((p) => p.raw).flatMap((p) => layers().flatMap((layer) =>
+      [...Array(buttonCountOf(layer)).keys()].map((i) => {
+        const m = currentMacro(p, layer, i);
+        return m && m.editable && m.steps.length
+          ? { index: p.index, layer, button: i, data: P.toHex(M.encodeMacro(m.steps, st.desc.sectorSize)) } : null;
+      }))).filter(Boolean) : [],
   }, 'profiles', st.name);
 }
 
@@ -307,11 +442,23 @@ export async function importBackup(file) {
       if (data.length !== st.desc.sectorSize || !P.hasValidCrc(data)) throw new Error(t('프로필 {n}의 백업 데이터가 손상되었습니다.', { n: e.index + 1 }));
       return [st.profiles[e.index], data, !!e.enabled];
     });
+    // 매크로: 이 기기에서 해석할 수 있는 것만 편집본으로 옮긴다. 저장할 때 빈 섹터에 새로 기록된다.
+    const macros = (macroSupported() && Array.isArray(b.macros) ? b.macros : []).flatMap((e) => {
+      const p = loaded.find(([q]) => q.index === e.index)?.[0];
+      if (!p || !layers().includes(e.layer) || !Number.isInteger(e.button) || e.button < 0 || e.button >= buttonCountOf(e.layer)) return [];
+      const data = P.fromHex(String(e.data));
+      if (data.length !== st.desc.sectorSize || !P.hasValidCrc(data)) throw new Error(t('프로필 {n}의 백업 데이터가 손상되었습니다.', { n: e.index + 1 }));
+      const m = M.readMacro((n) => (n === 0 ? data : null), { sector: 0, offset: 0 }, data.length);
+      return m.error || !m.editable || !m.steps.length ? [] : [[p, e.layer, e.button, m.steps]];
+    });
     for (const [p, data, enabled] of loaded) {
       if (p.raw) p.raw.set(data);
       else Object.assign(p, { raw: data, orig: new Uint8Array(data.length), source: 'rom' });
       p.enabled = enabled;
+      p.pending.clear();
     }
+    for (const [p, layer, i, steps] of macros) setPending(p, layer, i, steps);
+    st.macroEdit = null;
     toast(t('프로필 {n}개를 불러왔습니다. 「기기에 저장」을 눌러야 기기에 반영됩니다.', { n: loaded.length }), 'ok');
   } catch (e) {
     toast(e instanceof SyntaxError ? t('백업 파일을 읽지 못했습니다.') : e.message, 'error');
@@ -410,6 +557,7 @@ export function render(root) {
   const hasAnalog = layoutKnown() && st.layout.analog !== null;
   const tabList = [['overview', t('개요')], ['dpi', t('성능')], ['buttons', t('버튼')], hasAnalog && ['analog', t('HITS 구성')], ['info', t('고급')]].filter(Boolean);
   if (st.tab === 'analog' && !hasAnalog) st.tab = 'overview';
+  if (st.tab !== 'buttons') stopRecording(); // 녹화는 매크로 편집 칸이 보일 때만
   const body = st.tab === 'info' ? renderInfo(p)
     : !p.raw ? h('p', { class: 'empty' }, t('이 프로필은 기기에서 읽을 수 없습니다.'))
     : !layoutKnown() ? h('p', { class: 'empty' }, t('알 수 없는 프로필 형식입니다.'))
@@ -555,17 +703,24 @@ function renderButtons(p) {
     const buttonName = t('버튼 {n}', { n: i + 1 });
     const bytes = P.getBinding(p.raw, L, layer, i);
     const a = P.decodeBinding(bytes);
-    const apply = (action) => { P.setBinding(p.raw, L, layer, i, P.encodeBinding(action)); touched(true); };
-    const editable = ['mouse', 'key', 'consumer', 'special', 'disabled'];
-    const kinds = [['mouse', t('마우스 버튼')], ['key', t('키보드')], ['consumer', t('미디어')], ['special', t('특수 기능')], ['disabled', t('사용 안 함')]];
-    if (!editable.includes(a.kind)) kinds.push([a.kind, a.kind === 'macro' ? t('매크로 (편집 불가)') : t('기타 (편집 불가)')]);
+    const key = macroKey(layer, i);
+    const macro = currentMacro(p, layer, i); // 매크로가 걸려 있거나 매크로로 바꾸는 중이면 그 단계들
+    const kind = macro ? 'macro' : a.kind;
+    const apply = (action) => { p.pending.delete(key); P.setBinding(p.raw, L, layer, i, P.encodeBinding(action)); touched(true); };
+    const openMacro = () => { st.macroEdit = { index: p.index, layer, i }; render($('#editor')); };
+    const editable = ['mouse', 'key', 'consumer', 'special', 'disabled', ...(macroOk ? ['macro'] : [])];
+    const kinds = [['mouse', t('마우스 버튼')], ['key', t('키보드')], ['consumer', t('미디어')], ['special', t('특수 기능')], ['disabled', t('사용 안 함')],
+      macroOk && ['macro', t('매크로')]].filter(Boolean);
+    if (!editable.includes(kind)) kinds.push([kind, kind === 'macro' ? t('매크로 (편집 불가)') : t('기타 (편집 불가)')]);
     const defaults = {
       mouse: { kind: 'mouse', mask: 1 }, key: { kind: 'key', mods: 0, usage: 0 },
       consumer: { kind: 'consumer', usage: 0xcd }, special: { kind: 'special', code: 0x05 }, disabled: { kind: 'disabled' },
     };
 
     let detail = null;
-    if (a.kind === 'mouse') {
+    if (kind === 'macro') {
+      detail = macroOk && h('button', { disabled: ro, 'aria-label': t('{button} 매크로 편집', { button: buttonName }), onclick: openMacro }, t('매크로 편집'));
+    } else if (a.kind === 'mouse') {
       const bit = Math.max(0, Math.log2(a.mask & -a.mask) | 0);
       detail = h('select', { disabled: ro, 'aria-label': t('{button} 마우스 버튼', { button: buttonName }), onchange: (e) => apply({ kind: 'mouse', mask: 1 << Number(e.target.value) }) },
         [...Array(16).keys()].map((b) => h('option', { value: b, selected: b === bit }, K.mouseButtonName(b))));
@@ -604,11 +759,22 @@ function renderButtons(p) {
 
     return h('tr', null,
       h('th', { class: 'btn-idx', scope: 'row' }, buttonName),
-      h('td', { class: 'btn-desc' }, K.describe(a, bytes)),
-      h('td', null, h('select', { disabled: ro, 'aria-label': t('{button} 종류', { button: buttonName }), onchange: (e) => apply(defaults[e.target.value]) },
-        kinds.map(([kind, label]) => h('option', { value: kind, selected: kind === a.kind, disabled: !editable.includes(kind) }, label)))),
+      h('td', { class: 'btn-desc' }, kind === 'macro' ? macroSummary(macro) : K.describe(a, bytes)),
+      h('td', null, h('select', {
+        disabled: ro, 'aria-label': t('{button} 종류', { button: buttonName }),
+        onchange: (e) => {
+          if (e.target.value !== 'macro') return apply(defaults[e.target.value]);
+          p.pending.set(key, []);
+          openMacro();
+          touched(false);
+        },
+      }, kinds.map(([k, label]) => h('option', { value: k, selected: k === kind, disabled: !editable.includes(k) }, label)))),
       h('td', null, detail));
   };
+  const macroOk = macroSupported();
+  const edit = st.macroEdit;
+  const editing = macroOk && edit && edit.index === p.index && edit.layer === layer && edit.i < count;
+  if (!editing) stopRecording();
 
   return h('div', null,
     hasGShift && h('div', { class: 'segmented', role: 'group', 'aria-label': t('버튼 층') },
@@ -618,7 +784,101 @@ function renderButtons(p) {
     h('table', { class: 'buttons' },
       h('thead', null, h('tr', null, [t('버튼'), t('현재 동작'), t('종류'), t('설정')].map((x) => h('th', { scope: 'col' }, x)))),
       h('tbody', null, [...Array(count).keys()].map(row))),
+    editing && macroEditor(p, layer, edit.i, ro),
     h('p', { class: 'hint' }, t('버튼 번호는 기기 내부 순서입니다. 보통 1=왼쪽, 2=오른쪽, 3=휠 클릭 순이며 나머지는 기기마다 다릅니다.')));
+}
+
+// 매크로 단계의 이름과 한 줄 설명
+function stepName(s) {
+  switch (s.kind) {
+    case 'key': return K.keyName(s.mods, s.usage);
+    case 'mouse': return K.describe({ kind: 'mouse', mask: s.mask });
+    case 'consumer': return K.describe({ kind: 'consumer', usage: s.usage });
+    case 'delay': return t('{ms} ms 대기', { ms: num(s.ms) });
+  }
+  return t('기타 명령 ({bytes})', { bytes: P.toHex(s.bytes) });
+}
+const stepText = (s) => (s.kind === 'key' || s.kind === 'mouse' || s.kind === 'consumer' ? `${s.down ? '↓' : '↑'} ${stepName(s)}` : stepName(s));
+
+function macroSummary(m) {
+  if (m.error && !m.steps.length) return t('매크로 (읽을 수 없음)');
+  const names = m.steps.filter((s) => s.kind !== 'delay' && s.down !== false).map(stepName);
+  const keys = names.length ? names.slice(0, 4).join(' → ') + (names.length > 4 ? ' …' : '') : t('비어 있음');
+  return t('매크로: {keys}', { keys }) + (m.pending ? ' ' + t('(저장 전)') : '');
+}
+
+// 매크로 편집: 단계 목록과 녹화·대기·마우스 클릭 추가. 바꾼 내용은 편집본(p.pending)에 두고 「기기에 저장」 때 기록한다.
+function macroEditor(p, layer, i, ro) {
+  const max = M.capacity(st.desc.sectorSize);
+  const now = () => { const m = currentMacro(p, layer, i); return m && m.editable ? m.steps : []; };
+  const m = currentMacro(p, layer, i);
+  const steps = now();
+  const rec = st.recording;
+  const update = (next) => { setPending(p, layer, i, next); touched(true); };
+  const buttonName = t('버튼 {n}', { n: i + 1 });
+
+  const startRecording = () => {
+    const events = [];
+    const listener = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      events.push({ code: e.code, down: e.type === 'keydown', time: e.timeStamp });
+      const btn = document.getElementById('macro-record');
+      if (btn) btn.textContent = t('녹화 중지 ({n})', { n: events.length });
+    };
+    const stop = () => {
+      if (!stopRecording()) return;
+      const { steps: added, skipped } = M.stepsFromKeys(events);
+      if (skipped.length) toast(t('매크로에 넣을 수 없는 키는 뺐습니다: {keys}', { keys: skipped.join(', ') }), 'error');
+      const next = [...now(), ...added];
+      if (next.length > max) {
+        toast(t('매크로가 너무 깁니다 (최대 {max}단계).', { max }), 'error');
+        return render($('#editor'));
+      }
+      if (added.length) update(next);
+      else render($('#editor'));
+    };
+    st.recording = { listener, stop, events };
+    window.addEventListener('keydown', listener, true);
+    window.addEventListener('keyup', listener, true);
+    window.addEventListener('blur', stop);
+    render($('#editor'));
+    document.getElementById('macro-record')?.focus();
+  };
+
+  const busyRec = ro || !!rec;
+  return h('section', { class: 'macro-editor', 'aria-label': t('{button} 매크로', { button: buttonName }) },
+    h('div', { class: 'macro-head' },
+      h('h3', null, t('{button} 매크로', { button: buttonName })),
+      h('span', { class: 'hint' }, t('{n} / {max}단계', { n: steps.length, max }))),
+    m && !m.editable && h('p', { class: 'notice' }, t('이 매크로에는 GOMM이 표시할 수 없는 명령이 있습니다. 새로 녹화하면 기존 매크로를 대신합니다.')),
+    steps.length
+      ? h('ol', { class: 'macro-steps' }, steps.map((s, n) => h('li', null,
+        s.kind === 'delay'
+          ? h('label', null, h('input', {
+            type: 'number', min: 0, max: M.MAX_DELAY_MS, step: 10, value: s.ms, disabled: busyRec,
+            'aria-label': t('{n}번째 단계 대기 시간', { n: n + 1 }),
+            onchange: (e) => {
+              const ms = Math.min(M.MAX_DELAY_MS, Math.max(0, Math.round(Number(e.target.value) || 0)));
+              update(steps.map((x, k) => (k === n ? { ...x, ms } : x)));
+            },
+          }), ' ' + t('ms 대기'))
+          : h('span', null, stepText(s)),
+        h('button', { class: 'ghost', disabled: busyRec, 'aria-label': t('{n}번째 단계 삭제', { n: n + 1 }), onclick: () => update(steps.filter((_, k) => k !== n)) }, '✕'))))
+      : h('p', { class: 'empty' }, t('단계가 없습니다. 「녹화」를 누르고 키보드로 입력하세요.')),
+    h('div', { class: 'row-actions' },
+      h('button', { id: 'macro-record', class: rec ? 'primary' : '', disabled: ro, onclick: rec ? rec.stop : startRecording },
+        rec ? t('녹화 중지 ({n})', { n: rec.events.length }) : t('녹화')),
+      h('button', { disabled: busyRec || steps.length >= max, onclick: () => update([...steps, { kind: 'delay', ms: MACRO_DELAY_STEP_MS }]) }, t('+ 대기')),
+      h('select', {
+        disabled: busyRec || steps.length + 2 > max, 'aria-label': t('마우스 클릭 추가'),
+        onchange: (e) => { if (e.target.value !== '') update([...steps, ...M.mouseClick(1 << Number(e.target.value))]); },
+      }, h('option', { value: '' }, t('+ 마우스 클릭')), [0, 1, 2, 3, 4].map((b) => h('option', { value: b }, K.mouseButtonName(b)))),
+      h('button', { class: 'ghost', disabled: busyRec || !steps.length, onclick: () => update([]) }, t('모두 지우기')),
+      h('button', { class: 'ghost', onclick: () => { stopRecording(); st.macroEdit = null; render($('#editor')); } }, t('닫기'))),
+    h('p', { class: 'hint' }, t('녹화하는 동안 키보드 입력은 매크로에만 기록되고 다른 곳에 전달되지 않습니다. 키 사이의 시간도 대기로 기록됩니다.')
+      + ' ' + t('매크로 기록은 아직 실제 기기로 확인하지 않았습니다.')));
 }
 
 // 아날로그 버튼(작동점, 래피드 트리거, 클릭 햅틱). 허용 범위는 기기가 알려 주는 단계 수를 따르고

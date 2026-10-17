@@ -2,9 +2,11 @@
 // classic: 프로필 형식 2의 가상 마우스, extended: PRO X 2 DEX(형식 7)에서 읽은 데이터를 본뜬 마우스.
 import * as P from './profile.js';
 import { MODE } from './hidpp.js';
+import * as M from './macro.js';
 
 const SECTOR_SIZE = 255; // 실제 기기와 같이 16의 배수가 아닌 크기
 const PROFILE_COUNT = 3;
+const MACRO_SECTOR = 5;
 
 const VARIANTS = {
   classic: {
@@ -68,10 +70,18 @@ class MockTransport {
     const profiles = variant === 'classic'
       ? [classicProfile('', [400, 800, 1600, 3200], 1), classicProfile('FPS', [800, 1600], 1), classicProfile('Office', [1200], 8)]
       : [[1600], [800, 1200, 1600, 2400, 3200], [400]].map((dpis) => extendedProfile(dpis, variant === 'analog'));
+    // 첫 프로필의 마지막 버튼에 매크로(Ctrl+C)를 걸어 둔다. 매크로는 섹터 5에 있다.
+    const layout = variant === 'classic' ? P.LAYOUTS.classic : P.LAYOUTS.extended;
+    P.setBinding(profiles[0], layout, 'buttons', this.v.buttonCount - 1, M.macroBinding(MACRO_SECTOR));
+    P.finalize(profiles[0]);
+    const copy = M.encodeMacro([
+      { kind: 'key', down: true, mods: 0x01, usage: 0 }, { kind: 'key', down: true, mods: 0, usage: 0x06 },
+      { kind: 'delay', ms: 30 }, { kind: 'key', down: false, mods: 0, usage: 0x06 }, { kind: 'key', down: false, mods: 0x01, usage: 0 },
+    ], SECTOR_SIZE);
     this.sectors = new Map([
       [0x0000, P.buildDirectory(SECTOR_SIZE, [true, true, false])],
       [0x0001, profiles[0]], [0x0002, profiles[1]], [0x0003, profiles[2]],
-      [0x0101, profiles[0].slice()],
+      [0x0101, profiles[0].slice()], [MACRO_SECTOR, copy],
     ]);
   }
 
