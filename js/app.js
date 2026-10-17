@@ -59,7 +59,7 @@ async function connectDemo(kind) {
     } else {
       const { MockCompxDevice } = await import('./mock-compx.js');
       const atk = kind === 'atk';
-      const dev = atk ? new MockCompxDevice({ vendorId: C.VENDOR_ATK, productName: 'ATK A9 Ultra', cid: 2, mid: 87 }) : new MockCompxDevice();
+      const dev = atk ? new MockCompxDevice({ vendorId: C.VENDOR_ATK, productName: 'ATK A9 Ultra', cid: 2, mid: 87 }, { macro: true }) : new MockCompxDevice();
       // 가상 기기의 기본 DPI 기록은 VGN 방식이라, ATK A9 Ultra(10 단위 방식)는 그 방식으로 다시 쓴다.
       const model = C.modelFor(dev.vendorId, dev.identity.cid, dev.identity.mid);
       if (atk) for (const bank of dev.banks) [400, 800, 1600, 3200].forEach((dpi, i) => C.setDpi(bank, i, dpi, model));

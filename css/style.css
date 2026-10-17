@@ -535,3 +535,4 @@ main:focus { outline: none; }
 .macro-steps li:first-child { border-top: 0; }
 .macro-steps input[type=number] { width: 90px; }
 .macro-editor .row-actions { flex-wrap: wrap; }
+.inline-action { margin-left: 8px; }

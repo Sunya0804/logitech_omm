@@ -1,10 +1,13 @@
 // VGN 계열(compx.js) 프로토콜을 흉내 내는 개발·테스트용 가상 HID 기기. WebHID의 HIDDevice와 같은 모양을 갖는다.
 // 홈의 데모를 고를 때만 불러온다. 콘솔에서는 import('./js/mock-compx.js')로 불러와 OMM.connectCompx([new MockCompxDevice()])로 연결할 수 있다.
 import * as C from './compx.js';
+import * as X from './compx-macro.js';
+
+const FLASH_LENGTH = 0x1500; // 매크로 칸 12개(0x0300~0x14ff)까지
 
 
 function defaultImage() {
-  const img = new Uint8Array(256).fill(0xff);
+  const img = new Uint8Array(FLASH_LENGTH).fill(0xff);
   const F = C.FLASH;
   C.setScalar(img, F.reportRate, C.encodeRate(1000));
   C.setScalar(img, F.stageCount, 4);
@@ -27,8 +30,9 @@ function defaultImage() {
 }
 
 // identity: { vendorId, productName, cid, mid, type } 를 바꿔 다른 기종을 흉내 낼 수 있다.
+// options.macro: 프로필 1의 「앞으로」 버튼에 매크로 칸 M1(Ctrl+C)을 걸어 둔다 (ATK 데모).
 class MockCompxDevice {
-  constructor(identity = {}) {
+  constructor(identity = {}, options = {}) {
     this.identity = { vendorId: C.VENDOR_VGN, productName: 'VGN Demo Mouse', cid: 0x12, mid: 0x34, type: 1, ...identity };
     this.vendorId = this.identity.vendorId;
     this.productId = 0xfb49;
@@ -37,6 +41,13 @@ class MockCompxDevice {
     this.opened = false;
     // 프로필마다 설정 이미지가 따로 있다. 구분되도록 프로필별 첫 단계 DPI를 다르게 둔다.
     this.banks = [0, 1, 2, 3].map((i) => { const img = defaultImage(); C.setDpi(img, 0, 800 + 100 * i); return img; });
+    if (options.macro) {
+      this.banks[0].set(X.encodeSlot([
+        { kind: 'key', down: true, mods: 0x01, usage: 0 }, { kind: 'key', down: true, mods: 0, usage: 0x06 }, { kind: 'delay', ms: 30 },
+        { kind: 'key', down: false, mods: 0, usage: 0x06 }, { kind: 'key', down: false, mods: 0x01, usage: 0 },
+      ]), X.slotAddress(0));
+      C.setKey(this.banks[0], 4, X.KEY_CLASS, X.keyParam(0, X.REPEAT.ONCE));
+    }
     this.profile = 0;
     this.online = false;
     this.listeners = new Set();

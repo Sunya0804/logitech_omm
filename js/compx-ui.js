@@ -1,6 +1,8 @@
 // VGN·ATK(compx.js) 기기의 설정 화면. 기기에서 읽은 플래시 이미지의 사본을 고치고,
 // 「기기에 저장」을 누르면 바뀐 바이트만 기록한 뒤 다시 읽어 대조한다.
 import * as C from './compx.js';
+import * as X from './compx-macro.js';
+import { stopRecording, macroSummary, macroEditor } from './macro-editor.js';
 import { t, num } from './i18n.js';
 import { h, choice, toast, busy, ask, download, tabs, tabPanel, tile, field, app, shell } from './ui.js';
 
@@ -9,7 +11,12 @@ const DIAG_LENGTH = 256;
 // stageLimit: 연결했을 때 기기가 쓰고 있던 DPI 단계 수. 펌웨어가 몇 단계까지 받는지 알 수 없어 그보다 늘리지 않는다.
 // model: 기종별 선택지와 범위 (compx.js의 MODELS)
 // unlock: 실기기로 확인하지 못한 기종에서 사용자가 편집을 허용했는지
-const cx = { dev: null, info: null, model: null, extras: null, orig: null, work: null, stageLimit: 0, tab: 'overview', unlock: false };
+// macros: 지금 프로필의 매크로 칸들 (칸마다 이벤트 수부터 읽은 바이트, ATK가 아니거나 읽지 못하면 null)
+// pending: 저장 전 매크로 편집본 (칸 번호 → 단계들), macroEdit: 매크로를 편집 중인 버튼 번호
+const cx = {
+  dev: null, info: null, model: null, extras: null, orig: null, work: null, stageLimit: 0, tab: 'overview', unlock: false,
+  macros: null, pending: new Map(), macroEdit: null,
+};
 const deviceName = () => cx.model.model || cx.dev.name;
 const maxRate = () => Math.min(cx.info.maxRate, cx.model.maxRate);
 
@@ -17,12 +24,82 @@ export const filters = C.filters;
 export const state = cx;
 export const connected = () => !!cx.work;
 export const canEdit = () => connected() && (cx.model.verified !== false || cx.unlock);
-export const isDirty = () => connected() && C.diffRuns(cx.orig, cx.work).length > 0;
+export const isDirty = () => connected() && (C.diffRuns(cx.orig, cx.work).length > 0 || pendingWrites().length > 0);
 export const ownsDevice = (device) => !!cx.dev && cx.dev.devices.includes(device);
 
 const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 // 기종표의 [값, 표시] 목록을 화면 언어로 바꾼다.
 const translated = (options) => options.map(([v, label]) => [v, t(label)]);
+
+// ---------- 매크로 (ATK, compx-macro.js) ----------
+
+// ATK HUB에서 매크로를 지원하는 것은 ATK 기종뿐이다. 같은 프로토콜의 VGN은 매크로 저장 방식이 확인되지 않아 열지 않는다.
+const macroSupported = () => !!cx.macros;
+
+async function readMacros(dev) {
+  if (cx.model.brand !== 'ATK') return null;
+  try {
+    const slots = [];
+    for (let slot = 0; slot < X.SLOT_COUNT; slot++) slots.push(await X.readSlot(dev, slot));
+    return slots;
+  } catch {
+    return null; // 매크로 영역을 읽지 못하는 기기에서는 매크로를 다루지 않는다
+  }
+}
+
+const slotsIn = (image) => C.parse(image, cx.model).keys.map(X.keySlot);
+// 버튼이 가리키는 칸의 매크로. 편집본이 있으면 편집본이다.
+function currentMacro(i) {
+  const slot = slotsIn(cx.work)[i];
+  if (slot === null) return null;
+  if (cx.pending.has(slot)) return { steps: cx.pending.get(slot), editable: true, error: null, pending: true, slot };
+  if (slot >= X.SLOT_COUNT) return { steps: [], editable: false, error: 'slot', slot };
+  return { ...X.decodeSlot(cx.macros[slot]), pending: false, slot };
+}
+
+// 기록할 편집본: 버튼이 가리키는 칸의 것만 [칸, 단계들]
+function pendingWrites() {
+  if (!cx.macros) return [];
+  const used = new Set(slotsIn(cx.work));
+  return [...cx.pending].filter(([slot]) => used.has(slot));
+}
+
+// 버튼 i의 매크로를 둘 칸. 지금 칸을 이 버튼만 쓰면 그 칸이고, 아니면 어느 버튼도 쓰지 않는 빈 칸이다.
+// HUB의 매크로 목록에 남아 있는 매크로(버튼에 걸려 있지 않아도)는 덮어쓰지 않는다. 빈 칸이 없으면 null.
+function slotFor(i) {
+  const work = slotsIn(cx.work);
+  const own = work[i];
+  if (own !== null && own < X.SLOT_COUNT && work.every((s, j) => j === i || s !== own)) return own;
+  const used = new Set([...work, ...slotsIn(cx.orig), ...pendingWrites().map(([slot]) => slot)]);
+  for (let slot = 0; slot < X.SLOT_COUNT; slot++) {
+    if (!used.has(slot) && X.decodeSlot(cx.macros[slot]).empty && !cx.pending.has(slot)) return slot;
+  }
+  return null;
+}
+
+const sameBytes = (a, b) => a.length === b.length && a.every((v, k) => v === b[k]);
+const storedAs = (slot, steps) => {
+  try {
+    return !!steps.length && sameBytes(X.encodeSlot(steps).subarray(X.COUNT_OFFSET), cx.macros[slot]);
+  } catch {
+    return false; // 기록할 수 없는 단계면 편집본으로 둔다 (저장할 때 막힌다)
+  }
+};
+
+// 버튼 i의 매크로 단계를 정한다. 기기에 저장된 것과 같아지면 편집본을 지운다. 칸을 정하지 못하면 false.
+function setMacroSteps(i, steps) {
+  const slot = slotFor(i);
+  if (slot === null) {
+    toast(t('빈 매크로 칸이 없습니다. ATK HUB에서 쓰지 않는 매크로를 지운 뒤 다시 시도하세요.'), 'error');
+    return false;
+  }
+  const key = C.parse(cx.work, cx.model).keys[i];
+  const repeat = X.keySlot(key) === null ? X.REPEAT.ONCE : X.keyRepeat(key);
+  C.setKey(cx.work, i, X.KEY_CLASS, X.keyParam(slot, repeat));
+  if (storedAs(slot, steps)) cx.pending.delete(slot);
+  else cx.pending.set(slot, steps);
+  return true;
+}
 
 // 새 기종 지원을 위한 읽기 전용 정보: USB 식별값과 인터페이스, 그리고 가능하면 기기 식별값과 설정 메모리.
 async function collectDiagnostics(devices, dev) {
@@ -78,21 +155,23 @@ export async function connect(devices) {
     await offerDiagnostics(devices, dev, t('{name}: 아직 지원하지 않는 기종입니다 (식별값 {id}). 기종에 따라 DPI 저장 방식이 달라서 확인된 기종만 연결합니다.',
       { name: dev.name, id: `${cx.info.cid},${cx.info.mid}` }));
   }
-  const { image, extras } = await dev.withControl(async () => ({
+  const { image, extras, macros } = await dev.withControl(async () => ({
     image: await dev.readFlash(0, C.IMAGE_LENGTH),
     extras: await dev.readExtras(),
+    macros: await readMacros(dev),
   }));
   // 읽은 값이 이 구조로 말이 되는지 확인한다. 아니면 다른 구조의 기기이므로 건드리지 않는다.
   const m = C.parse(image, cx.model);
   const sane = C.RATES.includes(m.rate) && m.stageCount >= 1 && m.stageCount <= m.maxStages && m.currentStage < m.stageCount
     && (!cx.model.lod || cx.model.lod.some(([v]) => v === m.lod)) && image[C.FLASH.reportRate + 1] === C.check(image[C.FLASH.reportRate]);
   if (!sane) throw new Error(t('{name}: 설정 데이터가 알려진 구조와 맞지 않아 지원하지 않는 기기입니다.', { name: dev.name }));
-  Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: m.stageCount, tab: 'overview', unlock: false });
+  Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: m.stageCount, tab: 'overview', unlock: false, macros, pending: new Map(), macroEdit: null });
 }
 
 export async function disconnect() {
+  stopRecording();
   if (cx.dev) await cx.dev.close().catch(() => {});
-  Object.assign(cx, { dev: null, info: null, model: null, extras: null, orig: null, work: null, unlock: false });
+  Object.assign(cx, { dev: null, info: null, model: null, extras: null, orig: null, work: null, unlock: false, macros: null, pending: new Map(), macroEdit: null });
 }
 
 // 프로필마다 설정 이미지가 따로 있으므로, 바꾼 뒤 이미지를 다시 읽는다.
@@ -107,7 +186,8 @@ async function switchProfile(index) {
     await cx.dev.setProfile(index);
     const image = await cx.dev.readFlash(0, C.IMAGE_LENGTH);
     const extras = await cx.dev.readExtras();
-    Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: C.parse(image, cx.model).stageCount });
+    const macros = await readMacros(cx.dev);
+    Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: C.parse(image, cx.model).stageCount, macros, pending: new Map(), macroEdit: null });
     if (extras.profile !== index) throw new Error(t('기기가 프로필 전환을 확인하지 않았습니다. 현재 상태를 다시 읽었습니다.'));
   }));
   if (done) toast(t('프로필 {n}(으)로 전환했습니다.', { n: cx.extras.profile + 1 }), 'ok');
@@ -144,28 +224,43 @@ export function summary() {
 }
 
 export function revert() {
+  stopRecording();
   cx.work.set(cx.orig);
+  cx.pending.clear();
+  cx.macroEdit = null;
   shell.refresh();
 }
 
 export async function save() {
+  stopRecording();
   const runs = C.diffRuns(cx.orig, cx.work);
-  if (!runs.length || !canEdit()) return;
+  const macros = pendingWrites();
+  if ((!runs.length && !macros.length) || !canEdit()) return;
   const m = C.parse(cx.work, cx.model);
   if (!m.keys.some((k) => k.cls === 1 && k.param === 0x0100)) {
     return toast(t('왼쪽 클릭이 어느 버튼에도 할당되어 있지 않습니다. 한 버튼에는 왼쪽 클릭을 남겨 두세요.'), 'error');
   }
+  if (macros.some(([, steps]) => !X.eventCount(steps))) {
+    return toast(t('비어 있는 매크로가 있습니다. 단계를 넣거나 버튼에 다른 동작을 지정하세요.'), 'error');
+  }
   const ok = await ask(t('기기에 저장'), [
     t('변경된 설정을 {name}의 메모리에 씁니다.', { name: deviceName() }),
+    macros.length && t('매크로 기록은 아직 실제 기기로 확인하지 않은 기능입니다. 저장한 뒤 그 버튼을 눌러 동작을 확인하고, 이상하면 버튼에 다른 동작을 지정해 저장하세요.'),
     t('쓰는 동안 기기를 분리하거나 전원을 끄지 마세요.'),
-  ], t('저장'));
+  ].filter(Boolean), t('저장'));
   if (!ok) return;
   const done = await busy(t('저장 중…'), () => cx.dev.withControl(async () => {
+    // 매크로를 먼저 기록해서, 버튼이 기록되지 않은 칸을 가리키는 순간이 없게 한다.
+    for (const [slot, steps] of macros) {
+      cx.macros[slot] = await X.writeSlot(cx.dev, slot, steps);
+      cx.pending.delete(slot);
+    }
     for (const run of runs) await cx.dev.writeFlash(run.address, run.bytes);
     const back = await cx.dev.readFlash(0, C.IMAGE_LENGTH);
     // 실제로 기록된 상태를 기준으로 삼는다. 기기가 받아들이지 않은 값은 변경 사항으로 남는다.
     cx.orig = back;
     if (C.diffRuns(back, cx.work).length) throw new Error(t('일부 값이 기기에 반영되지 않았습니다. 화면에 남은 변경 사항을 확인하세요.'));
+    cx.pending.clear();
   }));
   if (done) toast(t('저장했습니다.'), 'ok');
   shell.refresh();
@@ -182,6 +277,9 @@ export function exportBackup() {
   download({
     type: BACKUP_TYPE, version: 1, device: deviceName(), exportedAt: new Date().toISOString(),
     vendorId: cx.dev.vendorId, cid: cx.info.cid, mid: cx.info.mid, profile: cx.extras.profile, image: toHex(cx.orig),
+    // 버튼에 걸린 매크로 칸의 내용 (이벤트 수부터)
+    macros: cx.macros ? [...new Set(slotsIn(cx.orig))].filter((s) => s !== null && s < X.SLOT_COUNT && !X.decodeSlot(cx.macros[s]).empty)
+      .map((slot) => ({ slot, data: toHex(cx.macros[slot]) })) : undefined,
   }, 'settings', deviceName());
   if (isDirty()) toast(t('기기에 저장된 설정을 내보냈습니다. 저장하지 않은 편집 내용은 들어 있지 않습니다.'), 'ok');
 }
@@ -196,6 +294,17 @@ function backupRanges(m, cur) {
   if (cx.model.lod) ranges.push(pair(F.lod));
   if (cx.model.lighting && m.hasDpiLight && cur.hasDpiLight) ranges.push([F.dpiColor, 4 * m.stageCount], [F.dpiLightMode, 8]);
   return ranges;
+}
+
+// 백업의 매크로 중 백업의 버튼이 가리키는 것: [칸, 단계들]. 해석할 수 없는 항목은 null.
+function backupMacros(b, m) {
+  if (!cx.macros || !Array.isArray(b.macros)) return [];
+  const used = new Set(m.keys.map(X.keySlot));
+  return b.macros.filter((e) => e && used.has(e.slot)).map((e) => {
+    if (!Number.isInteger(e.slot) || e.slot < 0 || e.slot >= X.SLOT_COUNT || typeof e.data !== 'string') return null;
+    const r = X.decodeSlot(fromHex(e.data));
+    return r.error || r.empty ? null : [e.slot, r.steps];
+  });
 }
 
 function checkBackup(b) {
@@ -222,19 +331,25 @@ function checkBackup(b) {
     ![F.motionSync, F.angleSnap, F.ripple].every((a) => img[a] <= 1) && '센서 설정',
     cx.model.lighting && m.hasDpiLight && !m.dpiColors.slice(0, m.stageCount).every(Boolean) && '표시등 색',
     !m.keys.some((k) => k.cls === 1 && k.param === 0x0100) && '왼쪽 클릭',
+    !backupMacros(b, m).every(Boolean) && '매크로',
   ].filter(Boolean);
   if (problems.length) {
     throw new Error(t('이 기기에 맞지 않는 값이 있어 불러오지 않았습니다: {items}', { items: problems.map((p) => t(p)).join(', ') }));
   }
-  return { img, m, cur };
+  return { img, m, cur, macros: backupMacros(b, m) };
 }
 
 export async function importBackup(file) {
   try {
     if (!canEdit()) throw new Error(t('편집을 허용한 뒤에 불러올 수 있습니다.'));
     const b = JSON.parse(await file.text());
-    const { img, m, cur } = checkBackup(b);
+    const { img, m, cur, macros } = checkBackup(b);
     for (const [address, length] of backupRanges(m, cur)) cx.work.set(img.subarray(address, address + length), address);
+    // 백업의 매크로는 같은 칸 번호로 되돌린다. 기기의 그 칸에 있던 매크로는 저장할 때 바뀐다.
+    stopRecording();
+    cx.pending.clear();
+    cx.macroEdit = null;
+    for (const [slot, steps] of macros) if (!storedAs(slot, steps)) cx.pending.set(slot, steps);
     toast(b.profile !== null && b.profile !== cx.extras.profile
       ? t('설정을 불러왔습니다 (프로필 {n}에서 내보낸 백업). 「기기에 저장」을 눌러야 기기에 반영됩니다.', { n: b.profile + 1 })
       : t('설정을 불러왔습니다. 「기기에 저장」을 눌러야 기기에 반영됩니다.'), 'ok');
@@ -312,8 +427,43 @@ function renderPerformance(m) {
       toggle(t('리플 컨트롤'), t('높은 DPI에서 생기는 미세한 떨림을 줄입니다.'), m.ripple, C.FLASH.ripple)));
 }
 
+// 매크로 반복 방식: [저장 값, 이름]. 1~252는 횟수다.
+const REPEAT_MODES = [[X.REPEAT.WHILE_HELD, '누르는 동안 반복'], [X.REPEAT.UNTIL_PRESSED_AGAIN, '다시 누를 때까지 반복'], [X.REPEAT.UNTIL_ANY_KEY, '아무 키나 누를 때까지 반복']];
+
+// 버튼 i의 매크로 편집 칸. 반복 방식은 버튼 기록에, 단계들은 편집본(cx.pending)에 둔다.
+function buttonMacroEditor(i, key) {
+  const repeat = X.keyRepeat(key);
+  const counted = repeat <= X.REPEAT.MAX_TIMES;
+  const setRepeat = (v) => { C.setKey(cx.work, i, X.KEY_CLASS, X.keyParam(X.keySlot(key), v)); edited(); };
+  const name = t(C.BUTTON_NAMES[i]);
+  const extra = h('div', { class: 'row-actions' },
+    h('select', { 'aria-label': t('{button} 매크로 반복 방식', { button: name }), onchange: (e) => setRepeat(Number(e.target.value) || 1) },
+      h('option', { value: counted ? repeat : 1, selected: counted }, t('정한 횟수만큼 실행')),
+      REPEAT_MODES.map(([v, label]) => h('option', { value: v, selected: v === repeat }, t(label)))),
+    counted && h('label', null, h('input', {
+      type: 'number', min: 1, max: X.REPEAT.MAX_TIMES, value: repeat || 1, 'aria-label': t('{button} 매크로 실행 횟수', { button: name }),
+      onchange: (e) => setRepeat(Math.min(X.REPEAT.MAX_TIMES, Math.max(1, Math.round(Number(e.target.value) || 1)))),
+    }), ' ' + t('회')));
+  return macroEditor({
+    title: t('{button} 매크로', { button: name }), max: X.MAX_EVENTS, size: X.eventCount, minDelay: 1, readOnly: !canEdit(), extra,
+    current: () => currentMacro(i),
+    onChange: (steps) => { setMacroSteps(i, steps); edited(); },
+    onClose: () => { cx.macroEdit = null; edited(); },
+    rerender: () => edited(),
+    notice: t('이 매크로는 읽을 수 없습니다. 새로 녹화하면 기존 매크로를 대신합니다.'),
+  });
+}
+
 function renderButtons(m) {
   const debounce = cx.model.debounce.map((v) => [v, String(v)]);
+  const macroOk = macroSupported();
+  const editing = macroOk && cx.macroEdit !== null && X.keySlot(m.keys[cx.macroEdit]) !== null;
+  if (!editing) stopRecording();
+  const openMacro = (i) => { cx.macroEdit = i; edited(); };
+  const chooseMacro = (i) => {
+    if (setMacroSteps(i, currentMacro(i)?.editable ? currentMacro(i).steps : [])) cx.macroEdit = i;
+    edited();
+  };
   return h('div', null,
     field(t('디바운스'), 'ms', choice(t('디바운스'), withCurrent(debounce, m.debounce), m.debounce, false, scalar(C.FLASH.debounce))),
     h('p', { class: 'hint field-desc' }, t('클릭 뒤 이 시간 동안은 같은 버튼의 추가 입력을 무시합니다. 더블클릭(채터링)이 생기면 값을 올리고, 반응을 빠르게 하려면 낮춥니다.')),
@@ -322,16 +472,35 @@ function renderButtons(m) {
       h('tbody', null, m.keys.map((key, i) => {
         const known = C.KEY_ACTIONS.findIndex(([cls, param]) => cls === key.cls && param === key.param);
         const name = t(C.BUTTON_NAMES[i]);
+        const isMacro = macroOk && X.keySlot(key) !== null;
         return h('tr', null,
           h('th', { class: 'btn-idx', scope: 'row' }, name),
-          h('td', { class: 'btn-desc' }, keyLabel(key)),
+          h('td', { class: 'btn-desc' }, isMacro ? macroLabel(key, currentMacro(i)) : keyLabel(key)),
           h('td', null, h('select', {
             'aria-label': t('{button} 바꿀 동작', { button: name }),
-            onchange: (e) => { const [cls, param] = C.KEY_ACTIONS[Number(e.target.value)]; C.setKey(cx.work, i, cls, param); edited(); },
+            onchange: (e) => {
+              if (e.target.value === 'macro') return chooseMacro(i);
+              const [cls, param] = C.KEY_ACTIONS[Number(e.target.value)];
+              C.setKey(cx.work, i, cls, param);
+              if (cx.macroEdit === i) cx.macroEdit = null;
+              edited();
+            },
           },
-            known < 0 && h('option', { value: -1, selected: true, disabled: true }, keyLabel(key)),
-            C.KEY_ACTIONS.map(([, , label], idx) => h('option', { value: idx, selected: idx === known }, t(label))))));
-      }))));
+            known < 0 && !isMacro && h('option', { value: -1, selected: true, disabled: true }, keyLabel(key)),
+            C.KEY_ACTIONS.map(([, , label], idx) => h('option', { value: idx, selected: idx === known }, t(label))),
+            macroOk && h('option', { value: 'macro', selected: isMacro }, t('매크로'))),
+          isMacro && h('button', { class: 'inline-action', 'aria-label': t('{button} 매크로 편집', { button: name }), onclick: () => openMacro(i) }, t('매크로 편집'))));
+      }))),
+    editing && buttonMacroEditor(cx.macroEdit, m.keys[cx.macroEdit]),
+    macroOk && h('p', { class: 'hint' }, t('매크로는 프로필마다 {n}칸까지 저장됩니다. ATK HUB에서 만든 매크로 목록 중 버튼에 걸리지 않은 것은 덮어쓰지 않습니다.', { n: X.SLOT_COUNT })));
+}
+
+// 매크로 칸 번호(M1~M12)와 내용 요약
+function macroLabel(key, macro) {
+  const slot = `M${X.keySlot(key) + 1}`;
+  if (!macro || macro.error === 'slot') return t('매크로 {slot} (알 수 없는 칸)', { slot });
+  if (macro.empty && !macro.pending) return t('매크로 {slot} (비어 있음)', { slot });
+  return `${slot} · ${macroSummary(macro)}`;
 }
 
 // 버튼 동작 이름. 표에 없는 값은 원래 바이트를 보여 준다.
@@ -390,6 +559,7 @@ function renderAdvanced(m) {
 
 export function render(root) {
   const m = C.parse(cx.work, cx.model);
+  if (cx.tab !== 'buttons') stopRecording(); // 녹화는 매크로 편집 칸이 보일 때만
   const tabList = [['overview', t('개요')], ['performance', t('성능')], ['buttons', t('버튼')], cx.model.lighting && ['lighting', t('조명')], ['advanced', t('고급')]].filter(Boolean);
   if (cx.tab === 'lighting' && !cx.model.lighting) cx.tab = 'overview';
   const body = cx.tab === 'performance' ? renderPerformance(m) : cx.tab === 'buttons' ? renderButtons(m)

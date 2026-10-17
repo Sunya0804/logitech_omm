@@ -3,6 +3,7 @@
 import * as P from './profile.js';
 import * as K from './keys.js';
 import * as M from './macro.js';
+import { stopRecording, macroSummary, macroEditor as editorPanel } from './macro-editor.js';
 import { MODE, FEATURE, HidppError, Hidpp, OnboardProfiles, WebHidTransport } from './hidpp.js';
 import { t, num } from './i18n.js';
 import { $, h, toast, ask, busy, download, choice, tabs, tabPanel, tile, field, shell } from './ui.js';
@@ -25,7 +26,6 @@ const DEFAULT_ANALOG_CAPS = { actuationMax: 10, hapticMax: 5, rtMax: 5 };
 const ISSUE_URL = 'https://github.com/Sunya0804/logitech_omm/issues/new';
 // 해석할 수 있는 매크로 형식 번호 (js/macro.js)
 const MACRO_FORMAT = 1;
-const MACRO_DELAY_STEP_MS = 50;
 
 export const filters = WebHidTransport.filters;
 
@@ -35,8 +35,8 @@ const st = {
   profiles: [], dirValid: false, crcTrusted: false,
   current: 0, mode: MODE.ONBOARD,
   selected: 0, tab: 'overview', layer: 'buttons', unlock: false,
-  // macroSectors: 읽어 둔 매크로 섹터(번호 → 바이트), macroEdit: 편집 중인 매크로 {index, layer, i}, recording: 녹화 상태
-  macroSectors: new Map(), macroEdit: null, recording: null,
+  // macroSectors: 읽어 둔 매크로 섹터(번호 → 바이트), macroEdit: 편집 중인 매크로 {index, layer, i}
+  macroSectors: new Map(), macroEdit: null,
 };
 
 // ---------- 연결 / 읽기 ----------
@@ -210,16 +210,6 @@ function currentMacro(p, layer, i) {
   if (pending) return { steps: pending, editable: true, error: null, pending: true };
   const target = M.macroTarget(P.getBinding(p.raw, st.layout, layer, i));
   return target ? { ...storedMacro(target), pending: false } : null;
-}
-
-function stopRecording() {
-  const rec = st.recording;
-  if (!rec) return null;
-  window.removeEventListener('keydown', rec.listener, true);
-  window.removeEventListener('keyup', rec.listener, true);
-  window.removeEventListener('blur', rec.stop);
-  st.recording = null;
-  return rec;
 }
 
 // ---------- 상태 판정 ----------
@@ -788,97 +778,17 @@ function renderButtons(p) {
     h('p', { class: 'hint' }, t('버튼 번호는 기기 내부 순서입니다. 보통 1=왼쪽, 2=오른쪽, 3=휠 클릭 순이며 나머지는 기기마다 다릅니다.')));
 }
 
-// 매크로 단계의 이름과 한 줄 설명
-function stepName(s) {
-  switch (s.kind) {
-    case 'key': return K.keyName(s.mods, s.usage);
-    case 'mouse': return K.describe({ kind: 'mouse', mask: s.mask });
-    case 'consumer': return K.describe({ kind: 'consumer', usage: s.usage });
-    case 'delay': return t('{ms} ms 대기', { ms: num(s.ms) });
-  }
-  return t('기타 명령 ({bytes})', { bytes: P.toHex(s.bytes) });
-}
-const stepText = (s) => (s.kind === 'key' || s.kind === 'mouse' || s.kind === 'consumer' ? `${s.down ? '↓' : '↑'} ${stepName(s)}` : stepName(s));
-
-function macroSummary(m) {
-  if (m.error && !m.steps.length) return t('매크로 (읽을 수 없음)');
-  const names = m.steps.filter((s) => s.kind !== 'delay' && s.down !== false).map(stepName);
-  const keys = names.length ? names.slice(0, 4).join(' → ') + (names.length > 4 ? ' …' : '') : t('비어 있음');
-  return t('매크로: {keys}', { keys }) + (m.pending ? ' ' + t('(저장 전)') : '');
-}
-
-// 매크로 편집: 단계 목록과 녹화·대기·마우스 클릭 추가. 바꾼 내용은 편집본(p.pending)에 두고 「기기에 저장」 때 기록한다.
+// 매크로 편집 칸. 바꾼 내용은 편집본(p.pending)에 두고 「기기에 저장」 때 기록한다.
 function macroEditor(p, layer, i, ro) {
-  const max = M.capacity(st.desc.sectorSize);
-  const now = () => { const m = currentMacro(p, layer, i); return m && m.editable ? m.steps : []; };
-  const m = currentMacro(p, layer, i);
-  const steps = now();
-  const rec = st.recording;
-  const update = (next) => { setPending(p, layer, i, next); touched(true); };
-  const buttonName = t('버튼 {n}', { n: i + 1 });
-
-  const startRecording = () => {
-    const events = [];
-    const listener = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.repeat) return;
-      events.push({ code: e.code, down: e.type === 'keydown', time: e.timeStamp });
-      const btn = document.getElementById('macro-record');
-      if (btn) btn.textContent = t('녹화 중지 ({n})', { n: events.length });
-    };
-    const stop = () => {
-      if (!stopRecording()) return;
-      const { steps: added, skipped } = M.stepsFromKeys(events);
-      if (skipped.length) toast(t('매크로에 넣을 수 없는 키는 뺐습니다: {keys}', { keys: skipped.join(', ') }), 'error');
-      const next = [...now(), ...added];
-      if (next.length > max) {
-        toast(t('매크로가 너무 깁니다 (최대 {max}단계).', { max }), 'error');
-        return render($('#editor'));
-      }
-      if (added.length) update(next);
-      else render($('#editor'));
-    };
-    st.recording = { listener, stop, events };
-    window.addEventListener('keydown', listener, true);
-    window.addEventListener('keyup', listener, true);
-    window.addEventListener('blur', stop);
-    render($('#editor'));
-    document.getElementById('macro-record')?.focus();
-  };
-
-  const busyRec = ro || !!rec;
-  return h('section', { class: 'macro-editor', 'aria-label': t('{button} 매크로', { button: buttonName }) },
-    h('div', { class: 'macro-head' },
-      h('h3', null, t('{button} 매크로', { button: buttonName })),
-      h('span', { class: 'hint' }, t('{n} / {max}단계', { n: steps.length, max }))),
-    m && !m.editable && h('p', { class: 'notice' }, t('이 매크로에는 GOMM이 표시할 수 없는 명령이 있습니다. 새로 녹화하면 기존 매크로를 대신합니다.')),
-    steps.length
-      ? h('ol', { class: 'macro-steps' }, steps.map((s, n) => h('li', null,
-        s.kind === 'delay'
-          ? h('label', null, h('input', {
-            type: 'number', min: 0, max: M.MAX_DELAY_MS, step: 10, value: s.ms, disabled: busyRec,
-            'aria-label': t('{n}번째 단계 대기 시간', { n: n + 1 }),
-            onchange: (e) => {
-              const ms = Math.min(M.MAX_DELAY_MS, Math.max(0, Math.round(Number(e.target.value) || 0)));
-              update(steps.map((x, k) => (k === n ? { ...x, ms } : x)));
-            },
-          }), ' ' + t('ms 대기'))
-          : h('span', null, stepText(s)),
-        h('button', { class: 'ghost', disabled: busyRec, 'aria-label': t('{n}번째 단계 삭제', { n: n + 1 }), onclick: () => update(steps.filter((_, k) => k !== n)) }, '✕'))))
-      : h('p', { class: 'empty' }, t('단계가 없습니다. 「녹화」를 누르고 키보드로 입력하세요.')),
-    h('div', { class: 'row-actions' },
-      h('button', { id: 'macro-record', class: rec ? 'primary' : '', disabled: ro, onclick: rec ? rec.stop : startRecording },
-        rec ? t('녹화 중지 ({n})', { n: rec.events.length }) : t('녹화')),
-      h('button', { disabled: busyRec || steps.length >= max, onclick: () => update([...steps, { kind: 'delay', ms: MACRO_DELAY_STEP_MS }]) }, t('+ 대기')),
-      h('select', {
-        disabled: busyRec || steps.length + 2 > max, 'aria-label': t('마우스 클릭 추가'),
-        onchange: (e) => { if (e.target.value !== '') update([...steps, ...M.mouseClick(1 << Number(e.target.value))]); },
-      }, h('option', { value: '' }, t('+ 마우스 클릭')), [0, 1, 2, 3, 4].map((b) => h('option', { value: b }, K.mouseButtonName(b)))),
-      h('button', { class: 'ghost', disabled: busyRec || !steps.length, onclick: () => update([]) }, t('모두 지우기')),
-      h('button', { class: 'ghost', onclick: () => { stopRecording(); st.macroEdit = null; render($('#editor')); } }, t('닫기'))),
-    h('p', { class: 'hint' }, t('녹화하는 동안 키보드 입력은 매크로에만 기록되고 다른 곳에 전달되지 않습니다. 키 사이의 시간도 대기로 기록됩니다.')
-      + ' ' + t('매크로 기록은 아직 실제 기기로 확인하지 않았습니다.')));
+  const title = t('{button} 매크로', { button: t('버튼 {n}', { n: i + 1 }) });
+  return editorPanel({
+    title, max: M.capacity(st.desc.sectorSize), readOnly: ro,
+    current: () => currentMacro(p, layer, i),
+    onChange: (next) => { setPending(p, layer, i, next); touched(true); },
+    onClose: () => { st.macroEdit = null; render($('#editor')); },
+    rerender: () => render($('#editor')),
+    notice: t('이 매크로에는 GOMM이 표시할 수 없는 명령이 있습니다. 새로 녹화하면 기존 매크로를 대신합니다.'),
+  });
 }
 
 // 아날로그 버튼(작동점, 래피드 트리거, 클릭 햅틱). 허용 범위는 기기가 알려 주는 단계 수를 따르고

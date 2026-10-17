@@ -538,4 +538,18 @@ export default {
   '기록할 수 없는 매크로 단계입니다.': 'This macro step cannot be written.',
   '매크로에 단계가 없습니다.': 'The macro has no steps.',
   '매크로가 너무 깁니다.': 'The macro is too long.',
+  // ATK 매크로
+  '매크로가 기기에 그대로 기록되지 않았습니다.': 'The macro was not written to the device as expected.',
+  '빈 매크로 칸이 없습니다. ATK HUB에서 쓰지 않는 매크로를 지운 뒤 다시 시도하세요.': 'There is no free macro slot. Delete unused macros in ATK HUB and try again.',
+  '누르는 동안 반복': 'Repeat while held',
+  '다시 누를 때까지 반복': 'Repeat until pressed again',
+  '아무 키나 누를 때까지 반복': 'Repeat until any key is pressed',
+  '{button} 매크로 반복 방식': '{button} macro repeat mode',
+  '정한 횟수만큼 실행': 'Run a set number of times',
+  '{button} 매크로 실행 횟수': '{button} macro run count',
+  '회': 'times',
+  '이 매크로는 읽을 수 없습니다. 새로 녹화하면 기존 매크로를 대신합니다.': 'This macro cannot be read. Recording a new one replaces it.',
+  '매크로는 프로필마다 {n}칸까지 저장됩니다. ATK HUB에서 만든 매크로 목록 중 버튼에 걸리지 않은 것은 덮어쓰지 않습니다.': 'Each profile stores up to {n} macros. Macros in the ATK HUB list that are not assigned to a button are never overwritten.',
+  '매크로 {slot} (알 수 없는 칸)': 'Macro {slot} (unknown slot)',
+  '매크로 {slot} (비어 있음)': 'Macro {slot} (empty)',
 };

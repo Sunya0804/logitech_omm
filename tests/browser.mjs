@@ -154,6 +154,69 @@ try {
   assert.equal(await page.evaluate(() => a9.writes.length), 0);
   assert.equal(await page.evaluate(() => OMM.compx.modelFor(OMM.compx.VENDOR_ATK, 1, 2).verified), false);
   await shot('a9-confirmed-ui.png');
+
+  // ATK 매크로: 기존 매크로 표시, 녹화로 이어 붙이기, 반복 방식, 매크로를 먼저 기록한 뒤 버튼을 기록하는지
+  await page.evaluate(async () => {
+    const c = OMM.compx;
+    window.a9m = new MockCompxDevice({ vendorId: c.VENDOR_ATK, productName: 'ATK A9 Ultra', cid: 2, mid: 87 }, { macro: true });
+    const model = c.modelFor(c.VENDOR_ATK, 2, 87);
+    for (const bank of a9m.banks) [400,800,1600,3200].forEach((dpi, i) => c.setDpi(bank, i, dpi, model));
+    await OMM.connectCompx([a9m]);
+    toastLog.length = 0;
+  });
+  await page.getByRole('tab', { name: '버튼', exact: true }).click();
+  const atkRow = page.locator('table.buttons tbody tr').nth(4);
+  assert.match(await atkRow.locator('.btn-desc').innerText(), /M1 · 매크로: Ctrl → C/);
+  await atkRow.getByRole('button', { name: '매크로 편집' }).click();
+  assert.equal(await page.locator('.macro-steps li').count(), 5);
+  await page.locator('#macro-record').click();
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Shift');
+  await page.locator('#macro-record').click();
+  assert.match(await atkRow.locator('.btn-desc').innerText(), /Shift → A.*저장 전/);
+  await page.getByRole('combobox', { name: '앞으로 매크로 반복 방식' }).selectOption('254');
+  // 다른 버튼을 빈 매크로로 바꾸면 빈 칸(M2)을 쓰고, 비어 있으면 저장을 막는다
+  await page.locator('table.buttons tbody tr').nth(3).locator('select').selectOption('macro');
+  assert.match(await page.locator('table.buttons tbody tr').nth(3).locator('.btn-desc').innerText(), /^M2 /);
+  await page.locator('#btn-save').click();
+  assert.match(await page.evaluate(() => toastLog.join(' ')), /비어 있는 매크로/);
+  await page.locator('table.buttons tbody tr').nth(3).locator('select').selectOption('3');
+  await shot('atk-macro.png');
+  await page.locator('#btn-save').click();
+  assert.match(await page.locator('#confirm-body').innerText(), /실제 기기로 확인하지 않은/);
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy && !OMM.compxUi.isDirty());
+  const atkSaved = await page.evaluate(async () => {
+    const X = await import('/js/compx-macro.js');
+    const c = OMM.compx;
+    const slot = (n) => X.decodeSlot(a9m.flash.subarray(X.slotAddress(n) + X.COUNT_OFFSET, X.slotAddress(n) + 384));
+    const order = a9m.writes.map(([address]) => address);
+    return {
+      key: c.decodeKey(a9m.flash, 4), back: c.decodeKey(a9m.flash, 3), m1: slot(0), m2empty: slot(1).empty,
+      macroFirst: order.indexOf(X.slotAddress(0)) >= 0 && order.indexOf(X.slotAddress(0)) < order.findIndex((a) => a >= c.FLASH.keys && a < c.FLASH.keys + 24),
+    };
+  });
+  assert.deepEqual(atkSaved.key, { cls: 6, param: 0x00fe });
+  assert.deepEqual(atkSaved.back, { cls: 1, param: 0x0800 });
+  assert.equal(atkSaved.m1.error, null);
+  assert.ok(atkSaved.m1.steps.some((s) => s.kind === 'key' && s.down && s.usage === 0x04));
+  assert.equal(atkSaved.m1.steps.filter((s) => s.kind === 'key').length, 8);
+  assert.equal(atkSaved.m2empty, true);
+  assert.equal(atkSaved.macroFirst, true);
+  assert.doesNotMatch(await atkRow.locator('.btn-desc').innerText(), /저장 전/);
+  // 백업에는 버튼에 걸린 매크로가 들어가고, 같은 내용을 불러오면 바뀐 것이 없다
+  const atkBackup = await page.evaluate(async () => {
+    let captured;
+    const orig = URL.createObjectURL;
+    URL.createObjectURL = (blob) => { captured = blob; return orig.call(URL, blob); };
+    OMM.compxUi.exportBackup();
+    URL.createObjectURL = orig;
+    return JSON.parse(await captured.text());
+  });
+  assert.deepEqual(atkBackup.macros.map((m) => m.slot), [0]);
+  await page.evaluate(async (b) => { await OMM.compxUi.importBackup(new File([JSON.stringify(b)], 'b.json')); }, atkBackup);
+  assert.equal(await page.evaluate(() => OMM.compxUi.isDirty()), false);
   await page.evaluate(async () => {
     window.mockMouse = makeMouse(0); mockMouse.profileNames = ['내 설정', '默认板载2', 'Profile 3'];
     await OMM.connectMchose([mockMouse]);
