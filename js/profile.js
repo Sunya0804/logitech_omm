@@ -23,6 +23,7 @@ const LAYOUTS = {
     buttons: 32, gshift: 96, maxButtons: 13, maxGShift: 16, name: 160, analog: null, minSize: 210,
   },
   // 형식 6: 보고율이 무선/유선 2바이트, DPI 단계가 [X(2), Y(2), LOD(1)] 5바이트.
+  // 사용자가 보내 준 PRO X 2 진단 정보(이슈 #1)의 ROM 프로필이 이 구조로 읽히는 것을 확인했다(쓰기는 미확인).
   // lodEditable: 리프트오프 거리 값(1 낮음, 2 중간, 3 높음)이 실기기 데이터로 확인된 형식인지 (형식 7, 8).
   extendedBasic: {
     id: 'extendedBasic', reportRate: WIRELESS_WIRED, rateUnit: 'index',

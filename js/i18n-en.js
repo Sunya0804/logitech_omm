@@ -552,4 +552,8 @@ export default {
   '매크로는 프로필마다 {n}칸까지 저장됩니다. ATK HUB에서 만든 매크로 목록 중 버튼에 걸리지 않은 것은 덮어쓰지 않습니다.': 'Each profile stores up to {n} macros. Macros in the ATK HUB list that are not assigned to a button are never overwritten.',
   '매크로 {slot} (알 수 없는 칸)': 'Macro {slot} (unknown slot)',
   '매크로 {slot} (비어 있음)': 'Macro {slot} (empty)',
+  // ---------- Logitech 공장 상태 ----------
+  "이 기기에는 아직 사용자 프로필이 없어(공장 상태) 기기에 내장된 프로필을 보여 줍니다. 체크섬 계산이 이 기기와 맞는지는 처음 저장할 때 확인됩니다.": "This device has no user profiles yet (factory state), so its built-in profile is shown. Whether the checksum matches this device is confirmed on the first save.",
+  "이 기기의 프로필 형식({format})은 실제 기기로 확인하지 못했습니다.": "The profile format of this device ({format}) has not been verified on a real device.",
+  "이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.": "I understand and allow editing. Export a backup first.",
 };
