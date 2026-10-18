@@ -8,6 +8,9 @@ import * as D from '../js/via-definition.js';
 import * as M from '../js/via-macro.js';
 import { ViaSession } from '../js/via-session.js';
 import { MockViaDevice } from '../js/mock-via.js';
+import { setLang } from '../js/i18n.js';
+
+setLang('ko'); // 오류 문구를 한국어 원문으로 맞춘다 (CI는 영어 환경)
 
 const capture = JSON.parse(readFileSync(new URL('./fixtures/via-qk80mk2.json', import.meta.url), 'utf8'));
 const captureKeymap = Array.from({ length: capture.keymap.length / 4 }, (_, i) => parseInt(capture.keymap.slice(4 * i, 4 * i + 4), 16));
