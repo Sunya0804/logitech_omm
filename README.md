@@ -112,6 +112,17 @@ M HUB(제조사 웹 드라이버)가 쓰는 세 가지 통신 방식(A5 1세대�
 `tests/fixtures/mchose-hardware.json`은 두 실기기의 읽기 전용 응답입니다.
 테스트의 쓰기 명령은 가상 기기의 메모리에서만 실행됩니다.
 
+## VIA 키보드 (작업 중, `codex/via-support` 브랜치)
+
+VIA(QMK) 키보드의 키맵·레이아웃 옵션·매크로·조명/설정 메뉴를 다루는 부분입니다. 통신·해석·저장(백엔드)까지 있고, 화면은 아직 없습니다.
+화면 작업 지시는 [docs/codex-via-frontend.md](docs/codex-via-frontend.md)에 있습니다.
+
+- 키보드마다 VIA 정의 파일(JSON)이 필요합니다. usevia.app 목록에 있는 키보드는 자동으로 받고, 없는 키보드는 제작사 웹 허브의 링크로 받은 파일을 불러옵니다.
+  - 예: Qwertykeys QK80 MK2 → `https://cfg.qwertykeys.com/definitions/v3/1363889410.json`
+- 키 코드는 VIA 프로토콜 12(QMK 0.19 이후 체계)만 편집합니다. 그보다 오래된 키보드는 읽기만 합니다.
+- 공장 초기화·부트로더 진입·키맵 초기화 명령은 보내지 않습니다. 초기화 같은 메뉴 동작은 값으로 읽지도 않습니다.
+- 실기기(QK80 MK2)에서 읽기 명령의 응답을 확인했고(`tests/fixtures/via-qk80mk2.json`, 정의 파일은 넣지 않음), 쓰기는 가상 기기로만 시험했습니다.
+
 ## 홈 제품 사진
 
 사진을 확인한 기종은 연결 후 홈 카드에 배경이 투명한 제품 사진을 표시합니다.
@@ -163,7 +174,9 @@ HITS 값의 허용 범위는 기기가 알려 주는 단계 수(HID++ `0x1B0C`)�
 | `js/mchose-ui.js` | MCHOSE 기기의 설정 화면 |
 | `js/tester.js` | 마우스 테스트 화면과 판정 로직 |
 | `js/device-images.js` | 홈 카드 제품 사진 목록 |
-| `js/mock.js`, `js/mock-compx.js` | 데모·테스트용 가상 기기 (데모를 고를 때만 불러옴) |
+| `js/via.js`, `js/via-keycodes.js`, `js/via-definition.js`, `js/via-macro.js` | VIA 키보드 통신, 키 코드 이름표, 정의 파일 해석, 매크로 버퍼 |
+| `js/via-session.js` | VIA 키보드의 읽은 값·편집본·저장·백업 (화면이 쓰는 창구) |
+| `js/mock.js`, `js/mock-compx.js`, `js/mock-via.js` | 데모·테스트용 가상 기기 (데모를 고를 때만 불러옴) |
 
 브랜드별 화면(`*-ui.js`)은 같은 모양의 함수 묶음(`connect`, `render`, `save`, `exportBackup` 등)을 내보내고, `app.js`가 연결된 기기에 맞는 것을 고릅니다.
 
