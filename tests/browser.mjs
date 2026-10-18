@@ -363,6 +363,156 @@ try {
     }
   }
   await shot('gomm-english.png');
+  // VIA: 제작사 파일 없이 직접 만든 정의와 가상 키보드로 저장 경계를 확인한다.
+  await page.evaluate(() => OMM.setLang('ko'));
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.evaluate(async () => {
+    const { MockViaDevice } = await import('/js/mock-via.js');
+    const { demoDefinition } = await import('/js/via-demo.js');
+    window.viaDef = demoDefinition();
+    // 시험용 메뉴: 위험 설정, 실행하면 안 되는 동작, 키 코드, 지원하지 않는 항목.
+    viaDef.menus[0].content[0].content.push(
+      { label: 'Connection', type: 'dropdown', options: [['USB', 0], ['Wireless', 1]], content: ['connection', 2, 1] },
+      { label: 'Factory reset', type: 'toggle', content: ['factory_reset', 2, 2] },
+      { label: 'Shortcut', type: 'keycode', content: ['shortcut', 2, 3] });
+    viaDef.menus.push('qmk_rgblight');
+    viaDef.layouts.keys.push({ x: 15, y: 0, w: 1, h: 1, encoder: 0 });
+    window.makeVia = (extra = {}) => new MockViaDevice({ vendorId: viaDef.vendorId, productId: viaDef.productId, productName: viaDef.name, rows: 5, cols: 16, layers: 3, macroCount: 4, macroBufferSize: 256, custom: { '1,1': [1] }, ...extra });
+    window.vm = makeVia();
+    await OMM.connectVia([vm], viaDef);
+  });
+  assert.equal(await page.locator('.via-key').count(), await page.evaluate(() => OMM.viaUi.state.session.keys().length + 1));
+  assert.equal(await page.evaluate(() => vm.log.length), 0);
+  await page.locator('#via-layer').selectOption('1');
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.layer), 1);
+  await page.locator('#via-layer').selectOption('0');
+  await page.locator('.via-key[data-row="0"][data-col="0"]').click();
+  await page.locator('#via-direct').fill('not-a-key');
+  await page.getByRole('button', { name: '직접 입력', exact: true }).click();
+  assert.match(await page.locator('.via-picker [role=alert]').innerText(), /읽을 수 없는/);
+  assert.equal(await page.evaluate(() => OMM.viaUi.isDirty()), false);
+  await page.locator('#via-direct').fill('LT(1, KC_SPC)');
+  await page.getByRole('button', { name: '직접 입력', exact: true }).click();
+  assert.equal(await page.evaluate(() => vm.log.length), 0);
+  assert.equal(await page.locator('.via-key.changed').count(), 1);
+  await saveNow();
+  assert.equal(await page.evaluate(() => vm.log.some((p) => p[0] === 5)), true);
+  assert.equal(await page.locator('.via-key[data-row="0"][data-col="0"]').innerText(), 'Space\nL1');
+  assert.equal(await page.locator('.via-key[data-row="0"][data-col="0"]').getAttribute('title'), 'LT(1, KC_SPC)');
+  // 키보드 입력과 위험 키 선택 확인. 취소하면 편집하지 않는다.
+  await page.getByRole('button', { name: '키보드로 고르기', exact: true }).click();
+  await page.keyboard.press('KeyC');
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.keycode(0, 0, 0)), 6);
+  await page.getByRole('button', { name: '특수', exact: true }).click();
+  await page.locator('.via-code-grid .danger').first().click();
+  assert.match(await page.locator('#confirm-body').innerText(), /재시작/);
+  await page.locator('#confirm button[value=cancel]').click();
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.keycode(0, 0, 0)), 6);
+  await page.locator('#btn-revert').click();
+  // 인코더의 두 방향은 별도로 선택·저장된다.
+  await page.locator('.via-key[data-encoder="0"]').last().click();
+  await page.locator('#via-direct').fill('KC_A');
+  await page.getByRole('button', { name: '직접 입력', exact: true }).click();
+  await saveNow();
+  assert.equal(await page.evaluate(() => vm.encoders.get('0,0,1')), 4);
+  await page.getByRole('tab', { name: '레이아웃', exact: true }).click();
+  const countBefore = await page.locator('.via-key').count();
+  await page.locator('[data-option="0"]').selectOption('1');
+  assert.equal(await page.locator('.via-key').count(), countBefore + 1);
+  await saveNow();
+  assert.equal(await page.evaluate(() => vm.layoutOptions), 1);
+  await page.getByRole('tab', { name: '조명 / 설정', exact: true }).click();
+  assert.equal(await page.locator('[data-action="factory_reset"] button, [data-action="factory_reset"] input').count(), 0);
+  assert.equal(await page.locator('[data-setting="brightness"]').count(), 1);
+  await page.locator('[data-setting="enabled"] input').uncheck();
+  assert.equal(await page.locator('[data-setting="brightness"]').count(), 0);
+  await page.locator('[data-setting="connection"] select').selectOption('1');
+  await page.locator('#btn-save').click();
+  assert.match(await page.locator('#confirm-body').innerText(), /주의: Connection/);
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy && !OMM.viaUi.isDirty());
+  assert.equal(await page.evaluate(() => { const cmds = vm.log.map((p) => p[0]); return cmds.lastIndexOf(7) < cmds.lastIndexOf(9); }), true);
+  await page.getByRole('tab', { name: '매크로', exact: true }).click();
+  await page.locator('.via-macros button').first().click();
+  await page.getByRole('button', { name: '+ 글자', exact: true }).click();
+  await page.locator('.macro-steps input[type=text]').fill('Hello VIA!');
+  await page.locator('.macro-steps input[type=text]').blur();
+  await saveNow();
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(vm.macroBuffer.slice(0, 10))), 'Hello VIA!');
+  await page.locator('.macro-steps input[type=text]').fill('한글');
+  await page.locator('.macro-steps input[type=text]').blur();
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.macro(0).steps[0].text), 'Hello VIA!');
+  // 백업은 읽은 값만 내보내고, 새 연결에 불러오면 편집본이 된다.
+  const viaDownload = page.waitForEvent('download');
+  await page.locator('#btn-export').click();
+  const viaBackup = JSON.parse(await fs.readFile(await (await viaDownload).path(), 'utf8'));
+  await page.evaluate(async () => { window.vm = makeVia(); await OMM.connectVia([vm], viaDef); });
+  await page.locator('#import-file').setInputFiles({ name: 'via.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(viaBackup)) });
+  await page.waitForFunction(() => OMM.viaUi.isDirty());
+  assert.equal(await page.evaluate(() => vm.log.length), 0);
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.customValue('connection')), 0);
+  await page.locator('#btn-revert').click();
+  // 키 시험은 쓰지 않으며, 탭/앱 화면을 떠나면 질의를 멈춘다.
+  await page.evaluate(() => {
+    vm.matrix = [[0, 0]]; window.matrixReads = 0;
+    const original = vm.sendReport.bind(vm);
+    vm.sendReport = (id, p) => { if (p[0] === 2 && p[1] === 3) matrixReads++; return original(id, p); };
+  });
+  await page.getByRole('tab', { name: '키 시험', exact: true }).click();
+  await page.waitForSelector('.via-key[data-row="0"][data-col="0"].pressed');
+  await page.getByRole('tab', { name: '키맵', exact: true }).click();
+  const reads = await page.evaluate(() => matrixReads);
+  await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(() => matrixReads), reads);
+  assert.doesNotMatch(await page.locator('#editor').innerText(), /false|undefined|\[object/);
+  await page.evaluate(() => document.querySelector('#toasts').replaceChildren());
+  await shot('via-desktop.png');
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const name of ['키맵', '레이아웃', '조명 / 설정', '매크로', '키 시험']) {
+    await page.getByRole('tab', { name, exact: true }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `VIA mobile ${name}`);
+  }
+  await page.getByRole('tab', { name: '키맵', exact: true }).click();
+  await shot('via-mobile.png');
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.evaluate(() => OMM.setLang('en'));
+  for (const name of ['Keymap', 'Layout', 'Lighting / Settings', 'Macro', 'Key tester']) {
+    await page.getByRole('tab', { name, exact: true }).click();
+    assert.doesNotMatch(await page.locator('#editor').innerText(), hangul);
+  }
+  await page.getByRole('tab', { name: 'Keymap', exact: true }).click();
+  await shot('via-english.png');
+  // 정의 파일이 없을 때 제작사 링크와 JSON 오류·기기 불일치·정상 파일 처리.
+  await page.route('https://usevia.app/**', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.evaluate(async () => { const { MockViaDevice } = await import('/js/mock-via.js'); localStorage.clear(); window.vm = new MockViaDevice(); await OMM.connectVia([vm]); });
+  assert.equal(await page.locator('.via-loader a').first().getAttribute('href'), 'https://cfg.qwertykeys.com/definitions/v3/1363889410.json');
+  assert.equal(await page.locator('#btn-save').isDisabled(), true);
+  await page.locator('#via-definition').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{') });
+  await page.waitForSelector('.via-loader [role=alert]');
+  await page.locator('#via-definition').setInputFiles({ name: 'other.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(viaBackup)) });
+  await page.waitForFunction(() => !OMM.state.busy);
+  assert.equal(await page.evaluate(() => OMM.viaUi.connected() && !OMM.viaUi.state.session), true);
+  const wrongDef = await page.evaluate(() => viaDef);
+  await page.locator('#via-definition').setInputFiles({ name: 'wrong.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(wrongDef)) });
+  await page.waitForFunction(() => !OMM.state.busy);
+  assert.match(await page.locator('.via-loader [role=alert]').innerText(), /different keyboard/);
+  const correctDef = { ...wrongDef, vendorId: 0x514b, productId: 0x4d02 };
+  await page.locator('#via-definition').setInputFiles({ name: 'correct.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(correctDef)) });
+  await page.waitForSelector('.via-key');
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), correctDef.name);
+  assert.equal(await page.evaluate(() => vm.log.length), 0);
+  await page.getByRole('button', { name: 'Change definition', exact: true }).click();
+  assert.equal(await page.locator('#via-definition').count(), 1);
+  assert.equal(await page.evaluate(() => localStorage.length), 0);
+  // 구형 프로토콜은 키맵만 막고 설정은 편집할 수 있다.
+  await page.evaluate(async () => { window.vm = makeVia({ protocol: 11 }); await OMM.connectVia([vm], viaDef); });
+  assert.equal(await page.locator('.via-key').first().isDisabled(), true);
+  await page.getByRole('tab', { name: 'Lighting / Settings', exact: true }).click();
+  assert.equal(await page.locator('[data-setting="enabled"] input').isEnabled(), true);
+  assert.equal(await page.locator('[data-setting="shortcut"] button').isDisabled(), true);
+  await page.evaluate(() => OMM.connectDemo('via'));
+  assert.equal(await page.evaluate(() => OMM.viaUi.connected() && OMM.state.demo), true);
+  console.log('Browser: VIA keymap/layers/encoder, staged writes, danger confirmation, layout, showIf/custom save, ASCII macro, backup, matrix polling, definition loading, protocol 11, demo, English and 390px passed.');
   await page.evaluate(() => OMM.setLang('ko'));
   assert.deepEqual(errors, []);
   console.log('Browser: ATK profiles, rejection and dirty cancel; MCHOSE UTF-8 names, tabs, staged save; official image/fallback, mobile, Logitech/VGN regressions; demo devices, VGN/MCHOSE backup round-trip, DPI/angle math and full English UI passed.');

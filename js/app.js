@@ -4,13 +4,15 @@ import * as C from './compx.js';
 import * as logitech from './logitech-ui.js';
 import * as compxUi from './compx-ui.js';
 import * as mchoseUi from './mchose-ui.js';
+import * as viaUi from './via-ui.js';
+import { hasViaInterface } from './via.js';
 import * as tester from './tester.js';
 import { isRecording } from './macro-editor.js';
 import { deviceImage } from './device-images.js';
 import { t, num, translateDom, setLang, getLang, onLangChange, LANGS } from './i18n.js';
 import { $, h, app, shell, toast, busy } from './ui.js';
 
-const UIS = [logitech, compxUi, mchoseUi];
+const UIS = [logitech, compxUi, mchoseUi, viaUi];
 const active = () => UIS.find((ui) => ui.connected()) || null;
 
 // ---------- 연결 ----------
@@ -33,11 +35,14 @@ async function disconnect() {
 // 기기 선택 창을 띄우고, 고른 기기의 제조사에 맞는 방식으로 연결한다.
 async function requestConnect() {
   try {
-    const picked = await navigator.hid.requestDevice({ filters: [...logitech.filters, ...C.filters, ...mchoseUi.filters] });
+    const picked = await navigator.hid.requestDevice({ filters: [...logitech.filters, ...C.filters, ...mchoseUi.filters, ...viaUi.filters] });
     if (!picked.length) return;
     const vendor = picked[0].vendorId;
-    if (mchoseUi.filters.some((f) => f.vendorId === vendor)) return await connectWith(mchoseUi, picked, t('MCHOSE 기기 읽는 중…'));
-    if (C.VENDOR_IDS.includes(vendor)) return await connectWith(compxUi, picked, t('기기 읽는 중…'));
+    const via = picked.some(hasViaInterface);
+    // 제품 ID까지 아는 마우스 경로를 먼저 고른다. 제조사 ID만 같은 키보드는 VIA로 보낸다.
+    if (mchoseUi.filters.some((f) => f.vendorId === vendor && (f.productId !== undefined ? picked.some((d) => d.productId === f.productId) : !via))) return await connectWith(mchoseUi, picked, t('MCHOSE 기기 읽는 중…'));
+    if (C.VENDOR_IDS.includes(vendor) && !via) return await connectWith(compxUi, picked, t('기기 읽는 중…'));
+    if (via) return await connectWith(viaUi, picked, t('키보드 정보 읽는 중…'));
     await connectWith(logitech, logitech.transportFor(picked), t('기기 검색 중…'));
   } catch (e) {
     toast(e.message, 'error');
@@ -74,7 +79,13 @@ async function pollBattery() {
 // MCHOSE는 실기기(K7 Ultra)에서 읽어 둔 응답을 재생한다.
 async function connectDemo(kind) {
   try {
-    if (kind === 'logitech') {
+    if (kind === 'via') {
+      const { MockViaDevice } = await import('./mock-via.js');
+      const { demoDefinition } = await import('./via-demo.js');
+      const json = demoDefinition();
+      const dev = new MockViaDevice({ vendorId: json.vendorId, productId: json.productId, productName: json.name, rows: 5, cols: 16, custom: { '1,1': [1] } });
+      await connectWith({ ...viaUi, connect: (devices, msg) => viaUi.connect(devices, msg, json) }, [dev], t('키보드 정보 읽는 중…'));
+    } else if (kind === 'logitech') {
       const { MockTransport } = await import('./mock.js');
       await connectWith(logitech, new MockTransport('analog'), t('기기 검색 중…'));
     } else if (kind === 'mchose') {
@@ -103,6 +114,7 @@ const VIEW_TITLES = { home: '홈', config: '기기 설정', test: '마우스 테
 let view = 'home';
 
 function setView(next) {
+  if (next !== 'config') viaUi.suspend();
   view = next;
   document.body.dataset.view = next;
   for (const btn of document.querySelectorAll('#views button')) {
@@ -112,6 +124,7 @@ function setView(next) {
     else btn.removeAttribute('aria-current');
   }
   $('#page-title').textContent = t(VIEW_TITLES[next]);
+  if (next === 'config') viaUi.resume();
 }
 
 function statusChips(sum) {
@@ -199,6 +212,7 @@ function render() {
   renderHome(ui);
   if (!ui) return;
   $('#sidebar').hidden = !ui.renderProfiles($('#sidebar'));
+  $('#editor').classList.toggle('via-editor', ui === viaUi);
   ui.render($('#editor'));
   renderActionBar();
 }
@@ -276,10 +290,11 @@ function init() {
 
 // 개발·테스트용 손잡이: 콘솔과 tests/browser.mjs가 쓴다.
 window.OMM = {
-  state: app, compx: C, logitech, compxUi, mchoseUi, tester, ui: { refresh: render },
+  state: app, compx: C, logitech, compxUi, mchoseUi, viaUi, tester, ui: { refresh: render },
   connect: (transport) => connectWith(logitech, transport, t('기기 검색 중…')),
   connectCompx: (devices) => connectWith(compxUi, devices, t('기기 읽는 중…')),
   connectMchose: (devices) => connectWith(mchoseUi, devices, t('MCHOSE 기기 읽는 중…')),
+  connectVia: (devices, json) => connectWith({ ...viaUi, connect: (arg, msg) => viaUi.connect(arg, msg, json) }, devices, t('키보드 정보 읽는 중…')),
   connectDemo, setLang, pollBattery,
 };
 init();

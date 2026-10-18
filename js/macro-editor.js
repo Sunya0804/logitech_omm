@@ -28,6 +28,7 @@ function stepName(s) {
     case 'mouse': return K.describe({ kind: 'mouse', mask: s.mask });
     case 'consumer': return K.describe({ kind: 'consumer', usage: s.usage });
     case 'delay': return t('{ms} ms 대기', { ms: num(s.ms) });
+    case 'text': return t('글자: {text}', { text: s.text });
   }
   return t('기타 명령 ({bytes})', { bytes: toHex(s.bytes) });
 }
@@ -102,14 +103,21 @@ function macroEditor(o) {
               o.onChange(steps.map((x, k) => (k === n ? { ...x, ms } : x)));
             },
           }), ' ' + t('ms 대기'))
-          : h('span', null, stepText(s)),
+          : s.kind === 'text' && o.allowText ? h('input', {
+            type: 'text', value: s.text, disabled: busyRec, 'aria-label': t('{n}번째 단계 글자', { n: n + 1 }),
+            onchange: (e) => {
+              if (/[^\x20-\x7e]/.test(e.target.value)) { toast(t('글자는 ASCII만 넣을 수 있습니다.'), 'error'); e.target.value = s.text; return; }
+              o.onChange(steps.map((x, k) => k === n ? { kind: 'text', text: e.target.value } : x));
+            },
+          }) : h('span', null, stepText(s)),
         h('button', { class: 'ghost', disabled: busyRec, 'aria-label': t('{n}번째 단계 삭제', { n: n + 1 }), onclick: () => o.onChange(steps.filter((_, k) => k !== n)) }, '✕'))))
       : h('p', { class: 'empty' }, t('단계가 없습니다. 「녹화」를 누르고 키보드로 입력하세요.')),
     h('div', { class: 'row-actions' },
       h('button', { id: 'macro-record', class: rec ? 'primary' : '', disabled: o.readOnly, onclick: rec ? rec.stop : startRecording },
         rec ? t('녹화 중지 ({n})', { n: rec.events.length }) : t('녹화')),
       h('button', { disabled: busyRec || size([...steps, delay]) > max, onclick: () => o.onChange([...steps, delay]) }, t('+ 대기')),
-      h('select', {
+      o.allowText && h('button', { disabled: busyRec, onclick: () => o.onChange([...steps, { kind: 'text', text: '' }]) }, t('+ 글자')),
+      !o.allowText && h('select', {
         disabled: busyRec || size([...steps, ...mouseClick(1)]) > max, 'aria-label': t('마우스 클릭 추가'),
         onchange: (e) => { if (e.target.value !== '') o.onChange([...steps, ...mouseClick(1 << Number(e.target.value))]); },
       }, h('option', { value: '' }, t('+ 마우스 클릭')), [0, 1, 2, 3, 4].map((b) => h('option', { value: b }, K.mouseButtonName(b)))),
