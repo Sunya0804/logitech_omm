@@ -170,15 +170,18 @@ test('showIf expressions are evaluated without eval', () => {
   assert.equal(D.evaluateShowIf(null, v), true);
 });
 
-test('definition sources: VIA can be fetched, Qwertykeys is a download link', async () => {
+test('definition sources: bundled copy first, then VIA, then the Qwertykeys download link', async () => {
   const sources = D.definitionSources(0x514b, 0x4d02);
-  assert.deepEqual(sources.map((s) => s.kind), ['fetch', 'link']);
-  assert.equal(sources[1].url, 'https://cfg.qwertykeys.com/definitions/v3/1363889410.json');
+  assert.deepEqual(sources.map((s) => s.kind), ['bundled', 'fetch', 'link']);
+  assert.equal(sources[0].url, 'definitions/qwertykeys/1363889410.json');
+  assert.equal(sources[2].url, 'https://cfg.qwertykeys.com/definitions/v3/1363889410.json');
+  assert.deepEqual(D.definitionSources(0x514b, 0x1111).map((s) => s.kind), ['fetch', 'link']);
   assert.equal(D.definitionSources(0x1234, 0x5678).length, 1);
   const html = async () => ({ ok: true, headers: { get: () => 'text/html' }, json: async () => { throw new Error('html'); } });
   assert.equal(await D.fetchDefinition(0x514b, 0x4d02, html), null);
   const json = async () => ({ ok: true, headers: { get: () => 'application/json' }, json: async () => RAW });
-  assert.equal((await D.fetchDefinition(0x514b, 0x4d02, json)).def.name, 'Test Board');
+  const found = await D.fetchDefinition(0x514b, 0x4d02, json);
+  assert.deepEqual([found.def.name, found.source.kind], ['Test Board', 'bundled']);
   assert.equal(await D.fetchDefinition(0x1111, 0x2222, json), null); // 다른 키보드의 파일
 });
 
@@ -267,4 +270,18 @@ test('backups round-trip into the staged edit and reject other keyboards', async
   assert.throws(() => fresh.importBackup({ ...backup, productId: 1 }), /다른 키보드/);
   assert.throws(() => fresh.importBackup({ ...backup, keymap: [1] }), /키맵/);
   assert.throws(() => fresh.importBackup({ type: 'x' }), /백업 파일이 아닙니다/);
+});
+
+test('the bundled QK80 MK2 definition parses and matches its keyboard', () => {
+  const json = JSON.parse(readFileSync(new URL('../definitions/qwertykeys/1363889410.json', import.meta.url), 'utf8'));
+  const def = D.parseDefinition(json);
+  assert.deepEqual([def.name, def.vendorId, def.productId, def.rows, def.cols], ['QK80 MK2', 0x514b, 0x4d02, capture.rows, capture.cols]);
+  assert.equal(D.visibleKeys(def, D.decodeLayoutOptions(0, def.options)).length, 86);
+  assert.deepEqual(def.menus.sections.map((x) => x.label), ['Lighting', 'Config']);
+  assert.deepEqual(def.menus.unsupported, []);
+  assert.ok(def.menus.items.find((i) => i.id === 'id_cp_connect_mode').danger);
+  assert.ok(def.menus.items.find((i) => i.id === 'id_cp_eeprom_reset').action);
+  // 실기기에서 읽은 메뉴 값이 모두 정의 파일의 항목과 짝이 맞는다
+  const heads = new Set(def.menus.items.map((i) => i.head.slice(0, 2).join(',')));
+  assert.ok(Object.keys(capture.custom).every((k) => heads.has(k)));
 });

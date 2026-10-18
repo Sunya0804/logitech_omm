@@ -15,11 +15,19 @@ const VENDOR_HUBS = {
   0x514b: { name: 'Qwertykeys', page: 'https://cfg.qwertykeys.com/#/', url: (id) => `https://cfg.qwertykeys.com/definitions/v3/${id}.json` },
 };
 
-// 이 키보드의 정의 파일을 받을 곳: [{kind: 'fetch' | 'link', name, url, page?}]
+// 이 사이트에 함께 실은 제작사 정의 파일 (definitions/README.md에 출처·날짜·해시). 키: vendorProductId
+const BUNDLED = {
+  1363889410: { name: 'Qwertykeys QK80 MK2', path: 'definitions/qwertykeys/1363889410.json', fetchedAt: '2026-10-18' },
+};
+
+// 이 키보드의 정의 파일을 받을 곳: [{kind: 'bundled' | 'fetch' | 'link', name, url, page?, fetchedAt?}]
+// bundled와 fetch는 fetchDefinition이 이 순서로 자동으로 받고, link는 사용자가 받아 불러온다.
 function definitionSources(vendorId, productId) {
   const id = vendorProductId(vendorId, productId);
   const hub = VENDOR_HUBS[vendorId];
+  const bundled = BUNDLED[id];
   return [
+    ...(bundled ? [{ kind: 'bundled', name: bundled.name, url: bundled.path, fetchedAt: bundled.fetchedAt }] : []),
     { kind: 'fetch', name: 'VIA', url: USEVIA(id) },
     ...(hub ? [{ kind: 'link', name: hub.name, url: hub.url(id), page: hub.page }] : []),
   ];
@@ -27,7 +35,7 @@ function definitionSources(vendorId, productId) {
 
 // 받아 갈 수 있는 곳에서 정의 파일을 찾는다. 없으면 null. (usevia.app은 없는 파일에도 HTML로 200을 돌려준다.)
 async function fetchDefinition(vendorId, productId, fetchFn = fetch) {
-  for (const source of definitionSources(vendorId, productId).filter((s) => s.kind === 'fetch')) {
+  for (const source of definitionSources(vendorId, productId).filter((s) => s.kind !== 'link')) {
     try {
       const res = await fetchFn(source.url);
       if (!res.ok || !/json/.test(res.headers.get('content-type') || '')) continue;
@@ -345,5 +353,5 @@ function visibleKeys(def, choices) {
 export {
   vendorProductId, definitionSources, fetchDefinition, rememberDefinition, rememberedDefinition, forgetDefinition,
   parseKle, parseMenus, parseDefinition, evaluateShowIf, encodeValue, decodeValue,
-  decodeLayoutOptions, encodeLayoutOptions, visibleKeys, VENDOR_HUBS,
+  decodeLayoutOptions, encodeLayoutOptions, visibleKeys, VENDOR_HUBS, BUNDLED,
 };

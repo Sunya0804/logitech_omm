@@ -24,11 +24,14 @@ let root;
 let timer = null;
 let pollEpoch = 0;
 let resizeObserver;
+const sourceText = () => (typeof state.source === 'function' ? state.source() : state.source || '');
 const hexId = (...ids) => ids.map((id) => id.toString(16).padStart(4, '0').toUpperCase()).join(':');
 const refresh = () => { if (root && connected()) render(root); shell.refreshActions(); };
 const edit = (fn) => { if (app.busy) return; try { fn(); refresh(); } catch (e) { toast(e.message, 'error'); } };
 
-async function loadDefinition(json, setMsg, source) {
+// remember: 사용자가 직접 불러온 파일만 이 브라우저에 기억한다. 내장·자동으로 받은 파일은 다음에 다시 받아서,
+// 사이트의 내장 파일이 바뀌면 그쪽을 쓰게 한다.
+async function loadDefinition(json, setMsg, source, remember = false) {
   const dev = state.dev;
   const session = new ViaSession(dev, json);
   await session.load(setMsg);
@@ -39,7 +42,7 @@ async function loadDefinition(json, setMsg, source) {
   state.selected = null;
   state.layer = 0;
   state.tab = 'keymap';
-  rememberDefinition(json);
+  if (remember) rememberDefinition(json);
 }
 
 export async function connect(devices, setMsg, json) {
@@ -47,11 +50,12 @@ export async function connect(devices, setMsg, json) {
   await state.dev.open();
   const { vendorId, productId } = state.dev;
   let definition = json || rememberedDefinition(vendorId, productId);
-  let source = json ? t('직접 불러온 파일') : t('이 브라우저에 기억한 파일');
+  // 출처 문구는 언어를 바꿔도 따라가도록 그릴 때 번역한다
+  let source = json ? () => t('직접 불러온 파일') : () => t('이 브라우저에 기억한 파일');
   if (!definition) {
     const found = await fetchDefinition(vendorId, productId);
     definition = found?.json;
-    source = found?.source.url;
+    source = found?.source.kind === 'bundled' ? () => t('내장 정의 파일 ({date} 받음)', { date: found.source.fetchedAt }) : found?.source.url;
   }
   if (definition) {
     try { await loadDefinition(definition, setMsg, source); }
@@ -80,7 +84,7 @@ async function importDefinition(file) {
   if (!file || app.busy) return;
   if (!/\.json$/i.test(file.name)) { state.error = t('JSON 파일을 골라 주세요.'); return refresh(); }
   await busy(t('키보드 정보 읽는 중…'), async (setMsg) => {
-    try { await loadDefinition(JSON.parse(await file.text()), setMsg, file.name); }
+    try { await loadDefinition(JSON.parse(await file.text()), setMsg, file.name, true); }
     catch (e) { state.error = e.message; }
   });
   shell.refresh();
@@ -271,7 +275,7 @@ export function render(el) {
     : state.tab === 'layout' ? layoutPanel() : state.tab === 'settings' ? settingsPanel() : state.tab === 'macros' ? macrosPanel()
       : [h('p', { class: 'hint', id: 'via-test-msg' }, t('키보드의 키를 눌러 확인하세요.')), keyboard(true)];
   root.replaceChildren(...[
-    h('div', { class: 'via-heading' }, h('div', null, h('h2', null, s.def.name), h('p', { class: 'hint' }, `${hexId(s.def.vendorId, s.def.productId)} · VIA ${s.protocol}`)),
+    h('div', { class: 'via-heading' }, h('div', null, h('h2', null, s.def.name), h('p', { class: 'hint' }, `${hexId(s.def.vendorId, s.def.productId)} · VIA ${s.protocol}${sourceText() ? ` · ${sourceText()}` : ''}`)),
       h('button', { class: 'ghost', disabled: app.busy, onclick: async () => {
         if (isDirty() && !await ask(t('정의 파일 바꾸기'), [t('저장되지 않은 변경을 버릴까요?')], t('바꾸기'))) return;
         suspend(); forgetDefinition(s.def.vendorId, s.def.productId); state.session = null; state.error = ''; shell.refresh();
@@ -311,6 +315,6 @@ export function exportDiagnostics() {
   const s = state.session;
   if (!s) return;
   download({ protocol: s.protocol, layers: s.layers, matrix: { rows: s.def.rows, cols: s.def.cols }, firmware: s.firmware,
-    id: hexId(s.def.vendorId, s.def.productId), definition: { name: s.def.name, source: state.source },
+    id: hexId(s.def.vendorId, s.def.productId), definition: { name: s.def.name, source: sourceText() },
     keymap: s.orig.keymap.map((c) => c.toString(16).padStart(4, '0')), unsupported: s.def.menus.unsupported }, 'via-diagnostics', s.def.name);
 }

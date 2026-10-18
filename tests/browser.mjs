@@ -503,7 +503,14 @@ try {
   await shot('via-english.png');
   // 정의 파일이 없을 때 제작사 링크와 JSON 오류·기기 불일치·정상 파일 처리.
   await page.route('https://usevia.app/**', (route) => route.fulfill({ status: 404, body: '' }));
+  // QK80 MK2는 사이트에 실린 정의 파일을 먼저 쓰고, 이 브라우저에 기억하지 않는다.
   await page.evaluate(async () => { const { MockViaDevice } = await import('/js/mock-via.js'); localStorage.clear(); window.vm = new MockViaDevice(); await OMM.connectVia([vm]); });
+  await page.waitForSelector('.via-key');
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), 'QK80 MK2');
+  assert.match(await page.locator('.via-heading .hint').innerText(), /Bundled definition \(downloaded 2026-10-18\)/);
+  assert.equal(await page.evaluate(() => [localStorage.length, vm.log.length].join()), '0,0');
+  await page.route('**/definitions/**', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.evaluate(async () => { window.vm = new (await import('/js/mock-via.js')).MockViaDevice(); await OMM.connectVia([vm]); });
   assert.equal(await page.locator('.via-loader a').first().getAttribute('href'), 'https://cfg.qwertykeys.com/definitions/v3/1363889410.json');
   assert.equal(await page.locator('#btn-save').isDisabled(), true);
   await page.locator('#via-definition').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{') });
