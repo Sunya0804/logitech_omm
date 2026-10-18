@@ -64,6 +64,25 @@ try {
   assert.equal(await page.evaluate(() => OMM.pollBattery()), true);
   assert.equal(await page.locator('#btn-export').isVisible(), true);
 
+  // 공장 상태의 형식 6 마우스(PRO X 2 진단 정보, 이슈 #1): CRC 없는 ROM 프로필을 보여 주고,
+  // 사용자가 허용하면 첫 저장으로 CRC가 붙은 사용자 프로필과 프로필 목록을 만든다.
+  await page.evaluate(async () => { const { MockTransport } = await import('/js/mock.js'); window.factory = new MockTransport('factory'); await OMM.connect(factory); });
+  assert.equal(await page.evaluate(() => [OMM.logitech.state.layout?.id, OMM.logitech.canEdit()].join()), 'extendedBasic,false');
+  assert.equal(await page.evaluate(() => OMM.logitech.state.profiles.filter((p) => p.source === 'rom' && p.raw).length), 3);
+  assert.match(await page.locator('#editor .notice').first().innerText(), /공장 상태/);
+  await page.locator('#editor .notice input[type=checkbox]').check();
+  assert.equal(await page.evaluate(() => OMM.logitech.canEdit()), true);
+  await page.evaluate(() => { const p = OMM.logitech.state.profiles[0]; p.raw[4] = 0x58; p.raw[6] = 0x58; OMM.ui.refresh(); }); // 첫 단계 800 → 856 DPI
+  await page.locator('#btn-save').click();
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.logitech.isDirty());
+  assert.equal(await page.evaluate(async () => {
+    const P = await import('/js/profile.js');
+    return [1, 2, 3, 0].map((s) => factory.sectors.has(s) && P.hasValidCrc(factory.sectors.get(s))).join() + ':' + factory.current;
+  }), 'true,true,true,true:1');
+  await page.evaluate(async () => { await OMM.connect(factory); });
+  assert.equal(await page.evaluate(() => [OMM.logitech.state.crcTrusted, OMM.logitech.state.profiles[0].source].join()), 'true,user');
+
   // Logitech 매크로: 기존 매크로 표시, 녹화로 이어 붙이기, 빈 섹터에 기록하고 버튼이 그 섹터를 가리키는지
   await page.evaluate(async () => { const { MockTransport } = await import('/js/mock.js'); window.lt = new MockTransport('classic'); await OMM.connect(lt); });
   await page.getByRole('tab', { name: '버튼', exact: true }).click();

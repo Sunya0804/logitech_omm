@@ -21,6 +21,11 @@ const VARIANTS = {
     name: 'GOMM Demo Mouse S', formatId: 8, buttonCount: 5,
     features: [0x0000, 0x0005, 0x8100, 0x2202, 0x1004, 0x8061, 0x1b0c],
   },
+  // 공장 상태의 형식 6 마우스: 사용자 영역이 비어 있고 ROM 프로필에 CRC가 없다 (PRO X 2 진단 정보, 이슈 #1)
+  factory: {
+    name: 'GOMM Demo Mouse F', formatId: 6, buttonCount: 5,
+    features: [0x0000, 0x0005, 0x8100, 0x2202, 0x1004, 0x8061],
+  },
 };
 
 // 확장 DPI 목록: 100~200(1), ~500(2), ~1000(5), ~2000(10), ~5000(20), ~10000(50), ~44000(100)
@@ -67,6 +72,13 @@ class MockTransport {
     this.current = 0x0001;
     this.write_ = null;
     this.analogLive = {}; // 0x1B0C로 설정된 버튼별 현재 값
+    if (variant === 'factory') {
+      const rom = extendedProfile([800, 1200, 1600, 2400, 3200]);
+      rom.fill(0xff, SECTOR_SIZE - 2);
+      this.sectors = new Map([[0x0101, rom]]);
+      this.current = 0x0101;
+      return;
+    }
     const profiles = variant === 'classic'
       ? [classicProfile('', [400, 800, 1600, 3200], 1), classicProfile('FPS', [800, 1600], 1), classicProfile('Office', [1200], 8)]
       : [[1600], [800, 1200, 1600, 2400, 3200], [400]].map((dpis) => extendedProfile(dpis, variant === 'analog'));

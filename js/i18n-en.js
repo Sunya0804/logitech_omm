@@ -639,4 +639,8 @@ export default {
   '백업의 매크로가 올바르지 않습니다.': 'The macros in the backup are invalid.',
   'VIA 인터페이스(사용 페이지 0xFF60)가 없는 기기입니다.': 'This device has no VIA interface (usage page 0xFF60).',
   '키보드가 이 명령(0x{command})을 지원하지 않습니다.': 'The keyboard does not support this command (0x{command}).',
+  // ---------- Logitech 공장 상태 ----------
+  "이 기기에는 아직 사용자 프로필이 없어(공장 상태) 기기에 내장된 프로필을 보여 줍니다. 체크섬 계산이 이 기기와 맞는지는 처음 저장할 때 확인됩니다.": "This device has no user profiles yet (factory state), so its built-in profile is shown. Whether the checksum matches this device is confirmed on the first save.",
+  "이 기기의 프로필 형식({format})은 실제 기기로 확인하지 못했습니다.": "The profile format of this device ({format}) has not been verified on a real device.",
+  "이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.": "I understand and allow editing. Export a backup first.",
 };

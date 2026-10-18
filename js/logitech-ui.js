@@ -32,7 +32,7 @@ export const filters = WebHidTransport.filters;
 const st = {
   transport: null, hidpp: null, op: null,
   name: '', battery: null, desc: null, dpiRange: DEFAULT_DPI_RANGE, rateIndexes: null, analogCaps: null, layout: null,
-  profiles: [], dirValid: false, crcTrusted: false,
+  profiles: [], dirValid: false, crcTrusted: false, crcMismatch: false,
   current: 0, mode: MODE.ONBOARD,
   selected: 0, tab: 'overview', layer: 'buttons', unlock: false,
   // macroSectors: 읽어 둔 매크로 섹터(번호 → 바이트), macroEdit: 편집 중인 매크로 {index, layer, i}
@@ -88,18 +88,27 @@ async function loadProfiles(setMsg) {
   const d = (st.desc = await op.getDescription());
   st.mode = await op.getMode();
   st.crcTrusted = false;
+  st.crcMismatch = false;
 
   // CRC가 맞는 섹터만 돌려준다. 맞는 섹터를 하나라도 읽으면 CRC 구현이 이 기기와 일치함이 확인된다.
-  const readValid = async (sector) => {
+  // 내용이 있는데 CRC가 틀린 섹터를 만나면 crcMismatch로 기억한다(그런 기기는 편집을 열지 않는다).
+  // rom: ROM 프로필 중에는 CRC 자리를 비워 둔(0xFFFF) 것이 있어(PRO X 2 진단 정보, 이슈 #1), 그런 섹터는 내용만 읽는다.
+  const readValid = async (sector, rom = false) => {
+    let data;
     try {
-      const data = await op.readSector(sector, d.sectorSize);
-      if (!P.hasValidCrc(data)) return null;
-      st.crcTrusted = true;
-      return data;
+      data = await op.readSector(sector, d.sectorSize);
     } catch (e) {
       if (e instanceof HidppError) return null;
       throw e;
     }
+    if (P.hasValidCrc(data)) {
+      st.crcTrusted = true;
+      return data;
+    }
+    if (data.every((b) => b === 0xff)) return null; // 한 번도 쓰지 않은 섹터
+    if (rom && data[data.length - 2] === 0xff && data[data.length - 1] === 0xff) return data;
+    st.crcMismatch = true;
+    return null;
   };
 
   setMsg(t('프로필 목록 읽는 중…'));
@@ -118,7 +127,7 @@ async function loadProfiles(setMsg) {
       // 사용자 영역이 비어 있으면 기기는 ROM(공장 초기값) 프로필을 쓴다.
       source = 'rom';
       sector = ROM_BASE + (i < d.profileCountOob ? i + 1 : 1);
-      raw = await readValid(sector);
+      raw = await readValid(sector, true);
     }
     const enabled = entry ? entry.enabled : !dir && i < Math.max(1, d.profileCountOob);
     // pending: 저장 전인 매크로 편집본 ('층:버튼' → 단계들)
@@ -231,7 +240,10 @@ const profileDirty = (p) => !!p.raw && (!P.sameData(p.raw, p.orig) || p.enabled 
 const needsSectorWrite = (p) => !!p.raw && (p.source !== 'user' || p.sector !== p.index + 1 || !P.sameData(p.raw, p.orig));
 const layoutKnown = () => !!st.layout;
 const formatVerified = () => layoutKnown() && DEVICE_VERIFIED_FORMATS.includes(st.desc.profileFormatId);
-export const canEdit = () => st.crcTrusted && layoutKnown() && (formatVerified() || st.unlock);
+// 공장 상태: 사용자 프로필을 한 번도 쓰지 않아 CRC가 있는 섹터가 없고, CRC 없는 ROM 프로필만 읽힌 기기.
+// CRC 계산이 이 기기와 맞는지 확인할 섹터가 없을 뿐 틀린 것은 아니므로, 사용자가 허용하면 편집을 연다.
+const factoryState = () => !st.crcTrusted && !st.crcMismatch && st.profiles.some((p) => p.raw);
+export const canEdit = () => layoutKnown() && (st.crcTrusted ? formatVerified() || st.unlock : factoryState() && st.unlock);
 export const isDirty = () => st.profiles.some(profileDirty);
 export const dirtyText = () => {
   const n = st.profiles.filter(profileDirty).length;
@@ -541,14 +553,20 @@ function touched(rerenderEditor) {
 export function render(root) {
   const p = st.profiles[st.selected];
   const notices = [];
-  if (!st.crcTrusted) {
+  const unlockBox = (text) => h('label', null,
+    h('input', { type: 'checkbox', checked: st.unlock, onchange: (e) => { st.unlock = e.target.checked; shell.refresh(); } }), ' ' + text);
+  if (!st.crcTrusted && factoryState() && layoutKnown()) {
+    notices.push(unlockBox([
+      t('이 기기에는 아직 사용자 프로필이 없어(공장 상태) 기기에 내장된 프로필을 보여 줍니다. 체크섬 계산이 이 기기와 맞는지는 처음 저장할 때 확인됩니다.'),
+      !formatVerified() && t('이 기기의 프로필 형식({format})은 실제 기기로 확인하지 못했습니다.', { format: st.desc.profileFormatId }),
+      t('이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.'),
+    ].filter(Boolean).join(' ')));
+  } else if (!st.crcTrusted) {
     notices.push(t('기기에서 체크섬이 맞는 프로필을 하나도 읽지 못했습니다. 안전을 위해 편집과 저장을 막았습니다.'));
   } else if (!layoutKnown()) {
     notices.push(t('이 기기의 프로필 형식({format})은 알려진 어떤 구조로도 해석되지 않아 편집할 수 없습니다.', { format: st.desc.profileFormatId }));
   } else if (!formatVerified()) {
-    notices.push(h('label', null,
-      h('input', { type: 'checkbox', checked: st.unlock, onchange: (e) => { st.unlock = e.target.checked; shell.refresh(); } }),
-      ' ' + t('이 기기의 프로필 형식({format})은 실제 기기로 확인하지 못했습니다. 값이 잘못 해석될 수 있음을 이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.', { format: st.desc.profileFormatId })));
+    notices.push(unlockBox(t('이 기기의 프로필 형식({format})은 실제 기기로 확인하지 못했습니다. 값이 잘못 해석될 수 있음을 이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.', { format: st.desc.profileFormatId })));
   }
   if (st.mode !== MODE.ONBOARD) {
     notices.push(t('기기가 호스트 모드입니다. 온보드 프로필은 온보드 메모리 모드에서만 적용됩니다. G HUB가 실행 중이면 기기를 호스트 모드로 되돌리니 먼저 종료하세요.'));
