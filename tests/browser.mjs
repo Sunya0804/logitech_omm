@@ -40,6 +40,9 @@ try {
     await OMM.connectMchose([window.mockMouse]);
   });
   assert.equal(await page.locator('#editor h2').textContent(), 'MCHOSE K7 Ultra');
+  // 배터리만 다시 읽어도 설정은 바뀌지 않는다.
+  await page.evaluate(() => OMM.pollBattery());
+  assert.equal(await page.evaluate(() => [OMM.mchoseUi.isDirty(), mockMouse.writes.length].join()), 'false,0');
   await page.getByRole('tab', { name: '성능', exact: true }).click();
   assert.equal(await page.locator('#editor input[type=number]').first().isDisabled(), true);
   await page.locator('.mchose-unlock input').check();
@@ -58,6 +61,7 @@ try {
   assert.equal(await page.evaluate(() => OMM.mchoseUi.state.original.pollingRateHz), 4000);
   await page.evaluate(async () => { const { MockTransport } = await import('/js/mock.js'); await OMM.connect(new MockTransport()); });
   assert.equal(await page.evaluate(() => OMM.mchoseUi.connected()), false);
+  assert.equal(await page.evaluate(() => OMM.pollBattery()), true);
   assert.equal(await page.locator('#btn-export').isVisible(), true);
 
   // Logitech 매크로: 기존 매크로 표시, 녹화로 이어 붙이기, 빈 섹터에 기록하고 버튼이 그 섹터를 가리키는지
@@ -117,6 +121,20 @@ try {
   await page.evaluate(async () => { ({ MockCompxDevice: window.MockCompxDevice } = await import('/js/mock-compx.js')); await OMM.connectCompx([new MockCompxDevice()]); });
   assert.equal(await page.evaluate(() => OMM.compxUi.connected()), true);
   assert.equal(await page.locator('#sidebar .profile').count(), 4);
+  // 배터리 갱신: 깨어 있으면 새 값을 보이고, 절전 중이면 깨우지 않고 직전 값을 두며, 다른 작업 중에는 묻지 않는다.
+  const batteryChip = () => page.locator('#device .chip[title="배터리"]').textContent();
+  await page.evaluate(async () => { window.vgn = new MockCompxDevice(); await OMM.connectCompx([vgn]); vgn.battery = 60; });
+  assert.match(await batteryChip(), /75%/);
+  assert.equal(await page.evaluate(() => OMM.pollBattery()), true);
+  assert.match(await batteryChip(), /60%/);
+  await page.evaluate(() => { vgn.awake = false; vgn.battery = 40; });
+  assert.equal(await page.evaluate(() => OMM.pollBattery()), false);
+  assert.match(await batteryChip(), /60%/);
+  assert.equal(await page.evaluate(() => vgn.online), false);
+  await page.evaluate(() => { vgn.awake = true; OMM.state.busy = true; });
+  assert.equal(await page.evaluate(() => OMM.pollBattery()), false);
+  await page.evaluate(() => { OMM.state.busy = false; });
+  assert.match(await batteryChip(), /60%/);
   await page.evaluate(async () => {
     window.atk = new MockCompxDevice({ vendorId: OMM.compx.VENDOR_ATK, productName: 'ATK X1 Pro Max', cid: 2, mid: 39 });
     await OMM.connectCompx([atk]);

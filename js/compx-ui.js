@@ -168,6 +168,16 @@ export async function connect(devices) {
   Object.assign(cx, { extras, orig: image, work: image.slice(), stageLimit: m.stageCount, tab: 'overview', unlock: false, macros, pending: new Map(), macroEdit: null });
 }
 
+// 배터리 잔량만 다시 읽는다. 연결할 때 잔량을 읽지 못한 기기(유선 등)는 묻지 않는다. 새 값을 받았으면 true.
+export async function refreshBattery() {
+  const dev = cx.dev;
+  if (!dev || !cx.extras?.battery) return false;
+  const battery = await dev.readBattery().catch(() => null);
+  if (!battery || cx.dev !== dev) return false;
+  cx.extras.battery = battery;
+  return true;
+}
+
 export async function disconnect() {
   stopRecording();
   if (cx.dev) await cx.dev.close().catch(() => {});

@@ -119,4 +119,6 @@ function macroEditor(o) {
       + ' ' + t('매크로 기록은 아직 실제 기기로 확인하지 않았습니다.')));
 }
 
-export { stopRecording, stepName, stepText, macroSummary, macroEditor };
+const isRecording = () => !!recording;
+
+export { isRecording, stopRecording, stepName, stepText, macroSummary, macroEditor };

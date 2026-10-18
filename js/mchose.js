@@ -130,6 +130,12 @@ class V2Driver extends Driver {
     return this.lane.run(async () => { await this.send(channel, tokens); await wait(settleMs); });
   }
 
+  // 배터리만 다시 읽는다 (상태 읽기와 같은 0x06 응답). 답이 없으면 null.
+  async readBattery() {
+    const power = await this.ask(SHORT, [0x06], r => r.subarray(0, 11).some(Boolean));
+    return power && power[9] <= 100 ? { percent: power[9], charging: !!power[10] } : null;
+  }
+
   async readConfig() {
     const c = await this.ask(LONG, [0x67], r => r.length >= 20 && isInt(le16(r, 4), 50, 42000));
     return c && configLooksValid(c) ? c : null;
@@ -393,6 +399,12 @@ class V3Driver extends Driver {
     return nameIn(this.device.productName, list) || list.find(m => m.pid === mousePid) || null;
   }
   async settings() { const s = await this.ask(0x0002); return s && s.length >= 9 ? s : null; }
+  // 배터리만 다시 읽는다 (기기 정보 0x0900). 수신기가 마우스 절전을 알리면(asleep) 값을 믿지 않고 null.
+  async readBattery() {
+    this.asleep = false;
+    const info = await this.ask(0x0900);
+    return info && info.length >= 14 && !this.asleep && info[12] <= 100 ? { percent: info[12], charging: !!info[11] } : null;
+  }
   async dpiTable(profile) {
     const d = await this.ask(0x0003, [profile, 0]);
     if (!d || d.length < 17) return null;
@@ -592,6 +604,11 @@ class A5Driver extends Driver {
     });
   }
   maybe(...args) { return this.ask(...args).catch(() => null); }
+  // 배터리만 다시 읽는다 (페이지 0의 0x83). 답이 없으면 null.
+  async readBattery() {
+    const power = await this.maybe(0, 0x83, 2);
+    return power ? { percent: Math.min(100, power[7]), charging: !!power[6] } : null;
+  }
 
   async dpiTable(profile) {
     const t = await this.ask(1, 0x81, 10, [profile, 6]);

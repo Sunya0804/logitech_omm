@@ -178,15 +178,15 @@ class Hidpp {
   }
 
   // {percent, charging} 또는 null
-  async getBattery() {
+  async getBattery(opts = {}) {
     let idx = await this.getFeature(FEATURE.UNIFIED_BATTERY);
     if (idx) {
-      const r = await this.request(idx, 1);
+      const r = await this.request(idx, 1, [], opts);
       return { percent: r[0], charging: r[2] >= 1 && r[2] <= 3 };
     }
     idx = await this.getFeature(FEATURE.BATTERY_LEVEL);
     if (idx) {
-      const r = await this.request(idx, 0);
+      const r = await this.request(idx, 0, [], opts);
       return { percent: r[0], charging: false };
     }
     return null;

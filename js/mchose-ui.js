@@ -22,6 +22,15 @@ export async function disconnect() {
   if (state.client) await state.client.close();
   Object.assign(state, { client: null, original: null, work: null, unlocked: false, stale: false });
 }
+// 배터리 잔량만 다시 읽는다. 연결할 때 잔량을 읽지 못한 기기는 묻지 않는다. 새 값을 받았으면 true.
+export async function refreshBattery() {
+  const client = state.client;
+  if (!client || state.original?.batteryPercent == null) return false;
+  const b = await client.readBattery();
+  if (!b || state.client !== client || !state.original) return false;
+  for (const s of [state.original, state.work]) Object.assign(s, { batteryPercent: b.percent, batteryState: b.charging ? 'Charging' : 'Discharging' });
+  return true;
+}
 export function summary() {
   const s = state.original;
   return { name: s.name, modeText: s.connectionType === 'Wired' ? t('유선 연결') : t('무선 연결'),

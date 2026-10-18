@@ -50,6 +50,8 @@ class MockCompxDevice {
     }
     this.profile = 0;
     this.online = false;
+    this.awake = true; // false면 절전 중인 마우스처럼 상태 조회에 offline으로 답하고 배터리 요청을 거부한다
+    this.battery = 75;
     this.listeners = new Set();
     this.writes = []; // 기록된 [주소, 바이트들]
   }
@@ -76,8 +78,8 @@ class MockCompxDevice {
     const address = (p[2] << 8) | p[3];
     switch (p[0]) {
       case 0x01: r.set([this.identity.cid, this.identity.mid, this.identity.type, 0], 9); break; // cid, mid, 연결 종류, 수신기 종류
-      case 0x03: this.online = p[5] === 1; r[5] = 1; break;
-      case 0x04: r.set([75, 0], 5); break;
+      case 0x03: this.online = p[5] === 1; r[5] = this.awake ? 1 : 0; break;
+      case 0x04: if (this.awake) r.set([this.battery, 0], 5); else r[1] = 1; break;
       case 0x08: r.set(this.flash.subarray(address, address + p[4]), 5); break;
       case 0x07:
         if (!this.online) { r[1] = 1; break; }

@@ -4,7 +4,8 @@ import { t } from './i18n.js';
 export const $ = (sel) => document.querySelector(sel);
 
 // busy: 기기와 통신하는 작업이 진행 중인지, demo: 가상 기기(데모)에 연결돼 있는지
-export const app = { busy: false, demo: false };
+// background: 화면 뒤에서 기기에 묻는 중인 작업(배터리 갱신)의 Promise. busy 작업은 이것이 끝난 뒤 시작한다.
+export const app = { busy: false, demo: false, background: null };
 
 // app.js가 채우는 화면 갱신 함수. 각 브랜드 화면은 값을 바꾼 뒤 이것을 부른다.
 export const shell = { refresh() {}, refreshActions() {} };
@@ -56,6 +57,7 @@ export async function busy(message, fn) {
   setMsg(message);
   $('#busy').hidden = false;
   try {
+    await app.background;
     await fn(setMsg);
     return true;
   } catch (e) {

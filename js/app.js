@@ -5,6 +5,7 @@ import * as logitech from './logitech-ui.js';
 import * as compxUi from './compx-ui.js';
 import * as mchoseUi from './mchose-ui.js';
 import * as tester from './tester.js';
+import { isRecording } from './macro-editor.js';
 import { deviceImage } from './device-images.js';
 import { t, num, translateDom, setLang, getLang, onLangChange, LANGS } from './i18n.js';
 import { $, h, app, shell, toast, busy } from './ui.js';
@@ -41,6 +42,30 @@ async function requestConnect() {
   } catch (e) {
     toast(e.message, 'error');
   }
+}
+
+// ---------- 배터리 ----------
+
+// 배터리 잔량은 1분마다 다시 읽는다. 다른 작업(읽기·저장) 중이거나 매크로를 녹화 중이면 건너뛴다.
+// 각 화면의 refreshBattery는 마우스를 깨우지 않게 묻고, 절전 중이거나 응답이 없으면 직전 값을 그대로 둔다.
+const BATTERY_POLL_MS = 60_000;
+
+async function pollBattery() {
+  const ui = active();
+  if (!ui || app.demo || app.busy || app.background || isRecording()) return false;
+  const job = ui.refreshBattery().catch(() => false);
+  app.background = job;
+  try {
+    if (!(await job) || active() !== ui) return false;
+  } finally {
+    app.background = null;
+  }
+  // 편집 중인 입력을 다시 그리면 포커스를 잃으므로, 그때는 상태 줄과 홈 카드만 바꾼다.
+  if ($('#editor').contains(document.activeElement)) {
+    renderDeviceBar(ui);
+    renderHome(ui);
+  } else render();
+  return true;
 }
 
 // ---------- 데모 ----------
@@ -246,6 +271,7 @@ function init() {
   tester.init(setView);
   setView(view);
   render();
+  setInterval(pollBattery, BATTERY_POLL_MS);
 }
 
 // 개발·테스트용 손잡이: 콘솔과 tests/browser.mjs가 쓴다.
@@ -254,6 +280,6 @@ window.OMM = {
   connect: (transport) => connectWith(logitech, transport, t('기기 검색 중…')),
   connectCompx: (devices) => connectWith(compxUi, devices, t('기기 읽는 중…')),
   connectMchose: (devices) => connectWith(mchoseUi, devices, t('MCHOSE 기기 읽는 중…')),
-  connectDemo, setLang,
+  connectDemo, setLang, pollBattery,
 };
 init();

@@ -52,6 +52,8 @@ const KEY_ACTIONS = [
   [2, 0x0100, 'DPI 순환'], [2, 0x0200, 'DPI 올리기'], [2, 0x0300, 'DPI 내리기'], [0, 0x0000, '사용 안 함'],
 ];
 
+// 배터리 응답 → {percent, charging}. 거부했거나 값이 범위를 벗어나면 null.
+const batteryOf = (r) => (r[1] === 0 && r[5] <= 100 ? { percent: r[5], charging: r[6] === 1 } : null);
 const check = (sum) => (0x55 - (sum & 0xff)) & 0xff;
 const sumOf = (bytes) => bytes.reduce((a, b) => a + b, 0);
 
@@ -389,6 +391,14 @@ class CompxDevice {
     return this.accepted(CMD.SET_PROFILE, (p) => p.set([1, index], 4), '프로필 전환');
   }
 
+  // 배터리만 다시 읽는다. 수신기에 제어를 요청하지 않고 상태만 물어서, 마우스가 절전 중이거나
+  // 수신기가 사용 중이면 깨우지 않고 null을 돌려준다. 실기기에서 절전 중인 마우스는 배터리 요청에 답하지 않았다.
+  async readBattery() {
+    const state = await this.accepted(CMD.ONLINE, (p) => { p[5] = 0; }, '제어 전환');
+    if (state[9] === 1 || state[5] !== 1) return null;
+    return batteryOf(await this.exchange(CMD.BATTERY));
+  }
+
   // 상태 조회. 지원하지 않는 항목은 null.
   async readExtras() {
     const optional = (command) => this.exchange(command).then((r) => (r[1] === 0 ? r : null), () => null);
@@ -398,7 +408,7 @@ class CompxDevice {
     const profile = await optional(CMD.GET_PROFILE);
     const ver = (r) => (r ? `${r[5]}.${r[6].toString(16).padStart(2, '0')}` : null);
     return {
-      battery: battery && battery[5] <= 100 ? { percent: battery[5], charging: battery[6] === 1 } : null,
+      battery: battery && batteryOf(battery),
       firmware: ver(version), dongleFirmware: ver(dongle),
       profile: profile && profile[5] < PROFILE_COUNT ? profile[5] : null,
     };

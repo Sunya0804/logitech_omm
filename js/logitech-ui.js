@@ -67,6 +67,16 @@ export async function connect(transport, setMsg) {
   await loadProfiles(setMsg || (() => {}));
 }
 
+// 배터리 잔량만 다시 읽는다. 연결할 때 잔량을 읽지 못한 기기는 묻지 않는다. 새 값을 받았으면 true.
+export async function refreshBattery() {
+  const hidpp = st.hidpp;
+  if (!hidpp || !st.battery) return false;
+  const battery = await hidpp.getBattery({ timeout: 1000 }).catch(() => null);
+  if (!battery || st.hidpp !== hidpp) return false;
+  st.battery = battery;
+  return true;
+}
+
 export async function disconnect() {
   stopRecording();
   if (st.transport) await st.transport.close().catch(() => {});
