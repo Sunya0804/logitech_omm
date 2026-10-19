@@ -13,7 +13,8 @@ import { t } from './i18n.js';
 export { filters };
 // combo: 조합 만들기 칸. kind 'none'이면 고른 키를 그대로 넣고, 'mods'·'mt'·'lt'면 고른 기본 키를 그 조합으로 감싼다.
 export const state = { dev: null, session: null, source: null, error: '', tab: 'keymap', layer: 0, selected: null, group: 'basic', macro: null, capture: false,
-  combo: { kind: 'none', mods: 0, right: false, layer: 1 } };
+  combo: { kind: 'none', mods: 0, right: false, layer: 1 }, previous: null };
+// previous: 「정의 파일 바꾸기」를 누르기 전의 {session, source}. 불러오기 화면에서 그대로 돌아갈 때 쓴다.
 export const connected = () => !!state.dev;
 // 구형 프로토콜도 조명·설정은 편집한다. 키맵은 각 입력 칸에서 별도로 막는다.
 export const canEdit = () => !!state.session;
@@ -45,7 +46,26 @@ async function loadDefinition(json, setMsg, source, remember = false) {
   state.selected = null;
   state.layer = 0;
   state.tab = 'keymap';
+  state.previous = null;
   if (remember) rememberDefinition(json);
+}
+
+// 정의 파일을 찾는 출처 문구 (언어를 바꿔도 따라가도록 그릴 때 번역한다)
+const foundSource = (found) => (found.source.kind === 'bundled' ? () => t('내장 정의 파일 ({date} 받음)', { date: found.source.fetchedAt }) : found.source.url);
+
+// 직접 불러온 파일 대신 내장 사본·VIA 목록에서 다시 찾는다. 찾으면 기억한 파일을 지운다.
+async function findAutomatically() {
+  const dev = state.dev;
+  if (!dev || app.busy) return;
+  await busy(t('정의 파일 찾는 중…'), async (setMsg) => {
+    const found = await fetchDefinition(dev.vendorId, dev.productId);
+    if (!found) { state.error = t('이 키보드의 정의 파일을 자동으로 찾지 못했습니다. 파일을 직접 불러오세요.'); return; }
+    try {
+      await loadDefinition(found.json, setMsg, foundSource(found));
+      forgetDefinition(dev.vendorId, dev.productId);
+    } catch (e) { state.error = e.message; }
+  });
+  shell.refresh();
 }
 
 export async function connect(devices, setMsg, json) {
@@ -58,7 +78,7 @@ export async function connect(devices, setMsg, json) {
   if (!definition) {
     const found = await fetchDefinition(vendorId, productId);
     definition = found?.json;
-    source = found?.source.kind === 'bundled' ? () => t('내장 정의 파일 ({date} 받음)', { date: found.source.fetchedAt }) : found?.source.url;
+    source = found && foundSource(found);
   }
   if (definition) {
     try { await loadDefinition(definition, setMsg, source); }
@@ -74,6 +94,7 @@ export async function disconnect() {
   const dev = state.dev;
   state.dev = null;
   state.session = null;
+  state.previous = null;
   state.error = '';
   state.capture = false;
   state.macro = null;
@@ -96,9 +117,13 @@ async function importDefinition(file) {
 function definitionLoader() {
   const dev = state.dev;
   const input = h('input', { type: 'file', accept: '.json,application/json', id: 'via-definition', onchange: (e) => importDefinition(e.target.files[0]) });
+  const back = () => { Object.assign(state, { session: state.previous.session, source: state.previous.source, previous: null, error: '' }); shell.refresh(); };
   return h('section', { class: 'via-loader' },
     h('h3', null, t('정의 파일 불러오기')),
     h('p', null, `${dev.name} · ${hexId(dev.vendorId, dev.productId)}`),
+    h('div', { class: 'row-actions' },
+      state.previous && h('button', { id: 'via-definition-back', disabled: app.busy, onclick: back }, t('취소하고 돌아가기')),
+      h('button', { class: 'ghost', id: 'via-definition-auto', disabled: app.busy, onclick: findAutomatically }, t('자동으로 찾기'))),
     definitionSources(dev.vendorId, dev.productId).filter((s) => s.kind === 'link').map((s) => h('div', { class: 'row-actions' },
       h('a', { href: s.url, target: '_blank', rel: 'noopener' }, t('정의 파일 받기 ({name})', { name: s.name })),
       h('a', { href: s.page, target: '_blank', rel: 'noopener' }, t('제작사 웹 허브 열기')))),
@@ -371,8 +396,8 @@ export function render(el) {
   root.replaceChildren(...[
     h('div', { class: 'via-heading' }, h('div', null, h('h2', null, s.def.name), h('p', { class: 'hint' }, `${hexId(s.def.vendorId, s.def.productId)} · VIA ${s.protocol}${sourceText() ? ` · ${sourceText()}` : ''}`)),
       h('button', { class: 'ghost', disabled: app.busy, onclick: async () => {
-        if (isDirty() && !await ask(t('정의 파일 바꾸기'), [t('저장되지 않은 변경을 버릴까요?')], t('바꾸기'))) return;
-        suspend(); forgetDefinition(s.def.vendorId, s.def.productId); state.session = null; state.error = ''; shell.refresh();
+        // 저장하지 않은 편집은 「취소하고 돌아가기」로 돌아오면 그대로 남는다. 새 정의 파일을 불러올 때만 버려진다.
+        suspend(); state.previous = { session: s, source: state.source }; state.session = null; state.error = ''; shell.refresh();
       } }, t('정의 파일 바꾸기')),
       h('button', { class: 'ghost', id: 'via-layout-export', disabled: app.busy, onclick: () => download(exportViaLayout(s), 'layout', s.def.name) }, t('VIA 파일 내보내기')),
       h('button', { class: 'ghost', id: 'via-layout-open', disabled: app.busy, onclick: () => root.querySelector('#via-layout-import').click() }, t('VIA 파일 불러오기')),

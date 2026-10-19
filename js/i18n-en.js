@@ -670,4 +670,8 @@ export default {
   "지금: {name}": "Current: {name}",
   "탭하면 키, 누르고 있으면 레이어": "Key on tap, layer while held",
   "탭하면 키, 누르고 있으면 수정자": "Key on tap, modifier while held",
+  "정의 파일 찾는 중…": "Looking for the definition file…",
+  "이 키보드의 정의 파일을 자동으로 찾지 못했습니다. 파일을 직접 불러오세요.": "Could not find a definition file for this keyboard automatically. Load the file yourself.",
+  "취소하고 돌아가기": "Cancel and go back",
+  "자동으로 찾기": "Find automatically",
 };

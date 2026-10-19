@@ -557,9 +557,21 @@ try {
   await page.waitForSelector('.via-key');
   assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), correctDef.name);
   assert.equal(await page.evaluate(() => vm.log.length), 0);
+  // 「정의 파일 바꾸기」 뒤에도 돌아갈 수 있고, 편집과 기억한 파일이 그대로 남는다
+  await page.evaluate(() => { OMM.viaUi.state.session.setKeycode(0, 0, 0, 0x29); OMM.ui.refresh(); });
   await page.getByRole('button', { name: 'Change definition', exact: true }).click();
   assert.equal(await page.locator('#via-definition').count(), 1);
-  assert.equal(await page.evaluate(() => localStorage.length), 0);
+  assert.equal(await page.evaluate(() => localStorage.length), 1);
+  await page.locator('#via-definition-back').click();
+  await page.waitForSelector('.via-key');
+  assert.equal(await page.evaluate(() => [OMM.viaUi.state.session.def.name, OMM.viaUi.isDirty()].join()), `${correctDef.name},true`);
+  // 자동으로 찾지 못하면 알리고, 기억한 파일은 지우지 않는다
+  await page.getByRole('button', { name: 'Change definition', exact: true }).click();
+  await page.locator('#via-definition-auto').click();
+  await page.waitForSelector('.via-loader [role=alert]');
+  assert.match(await page.locator('.via-loader [role=alert]').innerText(), /could not find/i);
+  assert.equal(await page.evaluate(() => localStorage.length), 1);
+  await page.evaluate(() => localStorage.clear());
   // 구형 프로토콜은 키맵만 막고 설정은 편집할 수 있다.
   await page.evaluate(async () => { window.vm = makeVia({ protocol: 11 }); await OMM.connectVia([vm], viaDef); });
   assert.equal(await page.locator('.via-key').first().isDisabled(), true);
