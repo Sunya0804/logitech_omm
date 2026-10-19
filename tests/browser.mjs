@@ -402,9 +402,9 @@ try {
   });
   assert.equal(await page.locator('.via-key').count(), await page.evaluate(() => OMM.viaUi.state.session.keys().length + 1));
   assert.equal(await page.evaluate(() => vm.log.length), 0);
-  await page.locator('#via-layer').selectOption('1');
+  await page.locator('.via-layers [data-layer="1"]').click();
   assert.equal(await page.evaluate(() => OMM.viaUi.state.layer), 1);
-  await page.locator('#via-layer').selectOption('0');
+  await page.locator('.via-layers [data-layer="0"]').click();
   await page.locator('.via-key[data-row="0"][data-col="0"]').click();
   await page.locator('#via-direct').fill('not-a-key');
   await page.getByRole('button', { name: '직접 입력', exact: true }).click();

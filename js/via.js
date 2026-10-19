@@ -100,16 +100,20 @@ class ViaDevice {
     await this.request([CMD.SET_KEYBOARD_VALUE, VALUE.LAYOUT_OPTIONS, value >>> 24, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff]);
   }
 
-  // 눌린 스위치: rows × cols 의 true/false. 응답의 2번 바이트부터 행마다 ceil(cols / 8) 바이트이고,
-  // 큰 쪽 바이트가 앞, 비트 0이 0번 열이다. 한 응답에 다 들어가지 않으면 시작 행(요청의 2번 바이트)을 옮겨 가며 읽는다.
-  async switchMatrix(rows, cols) {
+  // 눌린 스위치: rows × cols 의 true/false. 행마다 ceil(cols / 8) 바이트이고, 큰 쪽 바이트가 앞, 비트 0이 0번 열이다.
+  // 프로토콜 12는 요청의 2번 바이트로 시작 행을 받고 응답 2번 바이트에 그 값을 되돌려 주므로, 행 데이터는 3번 바이트부터다.
+  // (실기기 QK80 MK2에서 Esc·A·→를 눌러 확인했다.) 그 전 프로토콜은 시작 행 없이 2번 바이트부터 한 번에 보낸다.
+  async switchMatrix(rows, cols, protocol = 12) {
     const per = Math.ceil(cols / 8);
-    const perReply = Math.floor((REPORT_LENGTH - 4) / per);
+    const withOffset = protocol >= 12;
+    const start = withOffset ? 3 : 2;
+    const perReply = withOffset ? Math.floor((REPORT_LENGTH - 4) / per) : Math.floor((REPORT_LENGTH - start) / per);
+    if (!withOffset && rows > perReply) throw new Error(t('행렬이 커서 이 키보드에서는 키 시험을 할 수 없습니다.'));
     const out = [];
     for (let first = 0; first < rows; first += perReply) {
-      const r = await this.request([CMD.GET_KEYBOARD_VALUE, VALUE.SWITCH_MATRIX, first]);
+      const r = await this.request([CMD.GET_KEYBOARD_VALUE, VALUE.SWITCH_MATRIX, ...(withOffset ? [first] : [])]);
       for (let row = first; row < Math.min(rows, first + perReply); row++) {
-        const o = 2 + (row - first) * per;
+        const o = start + (row - first) * per;
         let bits = 0n;
         for (let i = 0; i < per; i++) bits = (bits << 8n) | BigInt(r[o + i]);
         out.push(Array.from({ length: cols }, (_, col) => ((bits >> BigInt(col)) & 1n) === 1n));

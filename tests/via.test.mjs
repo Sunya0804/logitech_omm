@@ -81,6 +81,18 @@ test('keymap and macro buffers are read in 28-byte chunks and the switch matrix 
   assert.equal(m[0][8], true);
   assert.equal(m.flat().filter(Boolean).length, 2);
   assert.deepEqual((await dev.switchMatrix(2, 3)).map((r) => r.map(Number)), [[0, 0, 1], [1, 0, 0]]);
+  // 실기기(QK80 MK2) 응답: A(3행 1열)를 누른 상태. 행 데이터는 3번 바이트부터다.
+  const real = { collections: [{ usagePage: 0xff60, usage: 0x61 }], opened: true, addEventListener: (_, fn) => { real.fn = fn; }, removeEventListener() {},
+    sendReport: async () => { const r = Uint8Array.from('0203000000000000000002'.padEnd(64, '0').match(/../g), (x) => parseInt(x, 16)); queueMicrotask(() => real.fn({ data: new DataView(r.buffer) })); } };
+  const qk = new ViaDevice([real]);
+  await qk.open();
+  const pressed = (await qk.switchMatrix(6, 16)).flatMap((r, row) => r.map((on, col) => (on ? `${row},${col}` : null))).filter(Boolean);
+  assert.deepEqual(pressed, ['3,1']);
+  // 프로토콜 11 이하는 2번 바이트부터
+  const old = new MockViaDevice({ protocol: 11, rows: 2, cols: 3, matrix: [[1, 2]] });
+  const oldDev = new ViaDevice([old]);
+  await oldDev.open();
+  assert.deepEqual((await oldDev.switchMatrix(2, 3, 11)).map((r) => r.map(Number)), [[0, 0, 0], [0, 0, 1]]);
 });
 
 test('protocol 12 keycodes are named, labelled and parsed back', () => {

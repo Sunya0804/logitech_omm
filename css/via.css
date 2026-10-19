@@ -1,5 +1,11 @@
 /* VIA 키보드와 선택 칸. 기존 앱의 색·입력 요소를 함께 쓴다. */
 .via-editor { --via-unit: 42px; }
+/* 키보드는 마우스보다 가로로 길어서 작업 칸을 넓게 쓴다 */
+#workspace:has(.via-editor) { max-width: 1480px; }
+.via-layers { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+.via-layers-label { color: var(--muted); margin-right: 6px; }
+.via-layers button { min-width: 44px; font-weight: 600; }
+.via-layers button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .via-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .via-heading p { margin: 6px 0 0; }
 .via-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
@@ -16,7 +22,7 @@
 .via-picker h3 { margin-top: 16px; }
 .via-groups { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .via-groups .active { border-color: var(--accent); color: var(--accent); }
-.via-code-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 5px; max-height: 220px; overflow-y: auto; margin: 12px 0; }
+.via-code-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 6px; max-height: 340px; overflow-y: auto; margin: 12px 0; }
 .via-code-grid button { min-height: 38px; padding: 3px; white-space: pre-line; font-size: 12px; }
 .via-picker input[type=text] { max-width: 100%; min-width: 0; }
 .via-drop { display: flex; flex-direction: column; gap: 16px; border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 26px 16px; margin: 18px 0; }

@@ -644,4 +644,5 @@ export default {
   "이 기기의 프로필 형식({format})은 실제 기기로 확인하지 못했습니다.": "The profile format of this device ({format}) has not been verified on a real device.",
   "이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.": "I understand and allow editing. Export a backup first.",
   '내장 정의 파일 ({date} 받음)': 'Bundled definition (downloaded {date})',
+  '행렬이 커서 이 키보드에서는 키 시험을 할 수 없습니다.': 'The matrix is too large to test keys on this keyboard.',
 };

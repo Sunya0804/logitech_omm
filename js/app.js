@@ -148,17 +148,26 @@ const MOUSE_ART = '<svg class="device-art" viewBox="0 0 200 300" aria-hidden="tr
   + '<rect x="16" y="132" width="16" height="40" rx="7" class="art-side"/><rect x="16" y="178" width="16" height="40" rx="7" class="art-side"/>'
   + '<path d="M72 236h56" class="art-glow"/></svg>';
 
+// 키보드(VIA)용 그림: 키 3줄과 스페이스바
+const KEYBOARD_ART = '<svg class="device-art keyboard" viewBox="0 0 200 120" aria-hidden="true">'
+  + '<defs><linearGradient id="art-k" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4cc9ff"/><stop offset="1" stop-color="#8b7bff"/></linearGradient></defs>'
+  + '<rect x="6" y="26" width="188" height="88" rx="12" class="art-body"/>'
+  + '<rect x="18" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="34" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="50" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="66" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="82" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="98" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="114" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="130" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="146" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="162" y="40" width="13" height="13" rx="2" class="art-wheel"/><rect x="18" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="34" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="50" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="66" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="82" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="98" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="114" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="130" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="146" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="162" y="56" width="13" height="13" rx="2" class="art-wheel"/><rect x="18" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="34" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="50" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="66" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="82" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="98" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="114" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="130" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="146" y="72" width="13" height="13" rx="2" class="art-wheel"/><rect x="162" y="72" width="13" height="13" rx="2" class="art-wheel"/>'
+  + '<rect x="50" y="90" width="100" height="13" rx="2" class="art-wheel"/>'
+  + '<path d="M40 18h120" stroke="url(#art-k)" stroke-width="5" stroke-linecap="round" fill="none"/></svg>';
+
 // 홈: 연결된 기기 카드와 "다른 기기 연결" 카드.
 function renderHome(ui) {
   const root = $('#home-devices');
   if (!ui) return root.replaceChildren();
   const sum = ui.summary();
   const art = h('div', { class: 'device-art-wrap' });
-  art.innerHTML = MOUSE_ART;
+  const drawing = sum.kind === 'keyboard' ? KEYBOARD_ART : MOUSE_ART;
+  art.innerHTML = drawing;
   const photo = deviceImage(sum.name);
   if (photo) {
     const img = h('img', { src: photo.image, alt: t('{name} 공식 제품 사진', { name: sum.name }), class: 'device-photo',
-      referrerpolicy: 'no-referrer', onerror: () => { art.innerHTML = MOUSE_ART; } });
+      referrerpolicy: 'no-referrer', onerror: () => { art.innerHTML = drawing; } });
     art.replaceChildren(img);
   }
   root.replaceChildren(

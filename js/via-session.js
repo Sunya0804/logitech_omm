@@ -186,7 +186,7 @@ class ViaSession {
 
   // ---------- 키 시험 ----------
 
-  matrixState() { return this.dev.switchMatrix(this.def.rows, this.def.cols); }
+  matrixState() { return this.dev.switchMatrix(this.def.rows, this.def.cols, this.protocol); }
 
   // ---------- 백업 ----------
 

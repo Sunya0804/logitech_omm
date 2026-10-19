@@ -225,6 +225,7 @@ ul.hint li { margin: 4px 0; }
 .device-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .device-art-wrap { display: grid; place-items: center; padding: 8px 0; border-radius: var(--radius); background: radial-gradient(260px 160px at 50% 60%, rgba(76, 201, 255, .12), transparent 70%); }
 .device-art { width: 130px; height: auto; }
+.device-art.keyboard { width: 220px; }
 .art-body { fill: var(--surface-3); stroke: var(--border-strong); stroke-width: 2; }
 .art-line { fill: none; stroke: var(--border-strong); stroke-width: 2; }
 .art-wheel, .art-side { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1.5; }

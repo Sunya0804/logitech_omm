@@ -52,11 +52,14 @@ class MockViaDevice {
         else if (p[1] === VALUE.LAYOUT_OPTIONS) r.set([this.layoutOptions >>> 24, (this.layoutOptions >> 16) & 0xff, (this.layoutOptions >> 8) & 0xff, this.layoutOptions & 0xff], 2);
         else if (p[1] === VALUE.FIRMWARE_VERSION) r.set([0, 0, 1, 8], 2);
         else if (p[1] === VALUE.SWITCH_MATRIX) {
+          // 프로토콜 12는 2번 바이트에 시작 행을 되돌려 주고 3번 바이트부터 행 데이터, 그 전은 2번 바이트부터
           const per = Math.ceil(this.cols / 8);
-          r.fill(0, 2);
+          const start = this.protocol >= 12 ? 3 : 2;
+          const first = this.protocol >= 12 ? p[2] : 0;
+          r.fill(0, start);
           for (const [row, col] of this.matrix || []) {
-            const o = 2 + (row - p[2]) * per + (per - 1 - Math.floor(col / 8));
-            if (row >= p[2] && o < 32) r[o] |= 1 << (col % 8);
+            const o = start + (row - first) * per + (per - 1 - Math.floor(col / 8));
+            if (row >= first && o < 32) r[o] |= 1 << (col % 8);
           }
         } else r[0] = CMD.UNHANDLED;
         break;

@@ -18,7 +18,7 @@ export const isDirty = () => state.session?.isDirty() || false;
 export const ownsDevice = (d) => state.dev?.dev === d;
 export const refreshBattery = async () => false;
 export const renderProfiles = () => false;
-export const summary = () => ({ name: state.session?.def.name || state.dev?.name || 'VIA', modeText: t('VIA 키보드'), dpi: null, rate: null, profileLabel: null, battery: null });
+export const summary = () => ({ kind: 'keyboard', name: state.session?.def.name || state.dev?.name || 'VIA', modeText: t('VIA 키보드'), dpi: null, rate: null, profileLabel: null, battery: null });
 
 let root;
 let timer = null;
@@ -105,9 +105,14 @@ function definitionLoader() {
     state.error && h('p', { class: 'notice', role: 'alert' }, state.error));
 }
 
+// 레이어: VIA처럼 번호 버튼을 나란히 두고 누르면 바로 바꾼다
 function layerPicker() {
-  return field(t('레이어'), null, h('select', { id: 'via-layer', value: state.layer, onchange: (e) => { state.layer = +e.target.value; state.selected = null; refresh(); } },
-    Array.from({ length: state.session.layers }, (_, i) => h('option', { value: i, selected: i === state.layer }, String(i)))));
+  return h('div', { class: 'via-layers', role: 'group', 'aria-label': t('레이어') },
+    h('span', { class: 'via-layers-label' }, t('레이어')),
+    Array.from({ length: state.session.layers }, (_, i) => h('button', {
+      type: 'button', class: i === state.layer ? 'active' : '', 'aria-pressed': String(i === state.layer), 'data-layer': i,
+      onclick: () => { if (state.layer === i) return; state.layer = i; state.selected = null; refresh(); },
+    }, String(i))));
 }
 
 function keyboard(test = false) {
@@ -284,7 +289,7 @@ export function render(el) {
     h('div', { class: 'stats via-stats' }, tile(t('레이어'), s.layers), tile(t('행렬'), `${s.def.rows} × ${s.def.cols}`), tile(t('매크로'), s.macroCount)),
     tabs(names, state.tab, (tab) => { suspend(); state.tab = tab; state.selected = null; refresh(); }, t('키보드 설정')),
     tabPanel(state.tab, body)].filter(Boolean));
-  const fit = () => { root.style.setProperty('--via-unit', `${Math.max(12, Math.min(48, (root.clientWidth - 36) / s.def.width))}px`); };
+  const fit = () => { root.style.setProperty('--via-unit', `${Math.max(12, Math.min(64, (root.clientWidth - 36) / s.def.width))}px`); };
   fit(); resizeObserver = new ResizeObserver(fit); resizeObserver.observe(root);
   if (state.tab === 'test' && document.body.dataset.view === 'config') startTest();
 }
