@@ -193,6 +193,13 @@ window.addEventListener('keydown', (e) => {
   if (!e.repeat) { state.capture = false; chooseCode(code); }
 }, true);
 
+// 키 시험 중에는 누른 키가 브라우저 단축키(F1 도움말, F5 새로고침, Ctrl+F 찾기, Alt 메뉴 등)로 실행되지 않게 막는다.
+// Ctrl+W·Ctrl+T·Alt+F4·Windows 키처럼 브라우저나 운영체제가 먼저 처리하는 조합은 웹 페이지에서 막을 수 없다.
+const keyTesting = () => state.tab === 'test' && !!state.session && !!root?.isConnected && document.body.dataset.view === 'config';
+for (const type of ['keydown', 'keyup']) {
+  window.addEventListener(type, (e) => { if (keyTesting() && !e.target.closest?.('dialog')) e.preventDefault(); }, true);
+}
+
 function layoutPanel() {
   const s = state.session;
   return h('div', null, s.def.options.length ? s.def.options.map((o, i) => field(o.label, null,
@@ -278,7 +285,9 @@ export function render(el) {
   const names = [['keymap', t('키맵')], ['layout', t('레이아웃')], ['settings', t('조명 / 설정')], ['macros', t('매크로')], ['test', t('키 시험')]];
   const body = state.tab === 'keymap' ? [layerPicker(), keyboard(), codePicker()]
     : state.tab === 'layout' ? layoutPanel() : state.tab === 'settings' ? settingsPanel() : state.tab === 'macros' ? macrosPanel()
-      : [h('p', { class: 'hint', id: 'via-test-msg' }, t('키보드의 키를 눌러 확인하세요.')), keyboard(true)];
+      : [h('p', { class: 'hint', id: 'via-test-msg' }, t('키보드의 키를 눌러 확인하세요.')),
+        h('p', { class: 'hint' }, t('시험하는 동안 F1·F5 같은 브라우저 단축키는 막습니다. Ctrl+W, Alt+F4, Windows 키처럼 브라우저나 운영체제가 먼저 처리하는 키는 막을 수 없습니다.')),
+        keyboard(true)];
   root.replaceChildren(...[
     h('div', { class: 'via-heading' }, h('div', null, h('h2', null, s.def.name), h('p', { class: 'hint' }, `${hexId(s.def.vendorId, s.def.productId)} · VIA ${s.protocol}${sourceText() ? ` · ${sourceText()}` : ''}`)),
       h('button', { class: 'ghost', disabled: app.busy, onclick: async () => {

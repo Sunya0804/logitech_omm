@@ -645,4 +645,5 @@ export default {
   "이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.": "I understand and allow editing. Export a backup first.",
   '내장 정의 파일 ({date} 받음)': 'Bundled definition (downloaded {date})',
   '행렬이 커서 이 키보드에서는 키 시험을 할 수 없습니다.': 'The matrix is too large to test keys on this keyboard.',
+  '시험하는 동안 F1·F5 같은 브라우저 단축키는 막습니다. Ctrl+W, Alt+F4, Windows 키처럼 브라우저나 운영체제가 먼저 처리하는 키는 막을 수 없습니다.': 'Browser shortcuts such as F1 and F5 are blocked while testing. Keys the browser or OS handles first, such as Ctrl+W, Alt+F4 and the Windows key, cannot be blocked.',
 };

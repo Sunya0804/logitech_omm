@@ -479,7 +479,12 @@ try {
   });
   await page.getByRole('tab', { name: '키 시험', exact: true }).click();
   await page.waitForSelector('.via-key[data-row="0"][data-col="0"].pressed');
+  // 키 시험 중에는 브라우저 단축키가 실행되지 않고, 다른 탭에서는 그대로 둔다
+  const blocked = (key) => page.evaluate((k) => !window.dispatchEvent(new KeyboardEvent('keydown', { key: k, cancelable: true })), key);
+  assert.equal(await blocked('F5'), true);
+  assert.equal(await blocked('F1'), true);
   await page.getByRole('tab', { name: '키맵', exact: true }).click();
+  assert.equal(await blocked('F5'), false);
   const reads = await page.evaluate(() => matrixReads);
   await page.waitForTimeout(250);
   assert.equal(await page.evaluate(() => matrixReads), reads);
