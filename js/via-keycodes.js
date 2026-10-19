@@ -74,9 +74,28 @@ const FIXED = [
   [0x782b, 'RGB_M_P', 'RGB Plain'], [0x782c, 'RGB_M_B', 'RGB Breathe'], [0x782d, 'RGB_M_R', 'RGB Rainbow'], [0x782e, 'RGB_M_SW', 'RGB Swirl'],
   [0x782f, 'RGB_M_SN', 'RGB Snake'], [0x7830, 'RGB_M_K', 'RGB Knight'], [0x7831, 'RGB_M_X', 'RGB Xmas'], [0x7832, 'RGB_M_G', 'RGB Gradient'],
   [0x7833, 'RGB_M_T', 'RGB Test'],
+  [0x7840, 'RM_ON', 'Matrix On'], [0x7841, 'RM_OFF', 'Matrix Off'], [0x7842, 'RM_TOGG', 'Matrix Toggle'], [0x7843, 'RM_NEXT', 'Matrix Mode +'],
+  [0x7844, 'RM_PREV', 'Matrix Mode -'], [0x7845, 'RM_HUEU', 'Matrix Hue +'], [0x7846, 'RM_HUED', 'Matrix Hue -'], [0x7847, 'RM_SATU', 'Matrix Sat +'],
+  [0x7848, 'RM_SATD', 'Matrix Sat -'], [0x7849, 'RM_VALU', 'Matrix Bright +'], [0x784a, 'RM_VALD', 'Matrix Bright -'],
+  [0x784b, 'RM_SPDU', 'Matrix Speed +'], [0x784c, 'RM_SPDD', 'Matrix Speed -'],
+  // 오디오 (QK_AUDIO)
+  [0x7480, 'AU_ON', 'Audio On'], [0x7481, 'AU_OFF', 'Audio Off'], [0x7482, 'AU_TOGG', 'Audio Toggle'],
+  [0x748a, 'CK_TOGG', 'Clicky Toggle'], [0x748b, 'CK_ON', 'Clicky On'], [0x748c, 'CK_OFF', 'Clicky Off'], [0x748d, 'CK_UP', 'Clicky +'],
+  [0x748e, 'CK_DOWN', 'Clicky -'], [0x748f, 'CK_RST', 'Clicky Reset'], [0x7490, 'MU_ON', 'Music On'], [0x7491, 'MU_OFF', 'Music Off'],
+  [0x7492, 'MU_TOGG', 'Music Toggle'], [0x7493, 'MU_NEXT', 'Music Mode'],
+  // 매직 (QK_MAGIC) 중 자주 쓰는 것
+  [0x7013, 'NK_TOGG', 'NKRO Toggle'],
   // 기능 (QK_QUANTUM). 부트로더·EEPROM 초기화는 키에 넣을 수는 있지만 선택 목록에서는 위험 표시를 한다.
   [0x7c00, 'QK_BOOT', 'Boot'], [0x7c01, 'QK_RBT', 'Reboot'], [0x7c02, 'DB_TOGG', 'Debug'], [0x7c03, 'EE_CLR', 'EEPROM Clear'],
   [0x7c16, 'QK_GESC', 'Esc `'], [0x7c73, 'CW_TOGG', 'Caps Word'],
+  [0x7c10, 'AS_DOWN', 'AutoShift -'], [0x7c11, 'AS_UP', 'AutoShift +'], [0x7c12, 'AS_RPT', 'AutoShift ?'], [0x7c13, 'AS_ON', 'AutoShift On'],
+  [0x7c14, 'AS_OFF', 'AutoShift Off'], [0x7c15, 'AS_TOGG', 'AutoShift'], [0x7c17, 'VK_TOGG', 'Velocikey'],
+  [0x7c18, 'SC_LCPO', 'LCtrl ('], [0x7c19, 'SC_RCPC', 'RCtrl )'], [0x7c1a, 'SC_LSPO', 'LShift ('], [0x7c1b, 'SC_RSPC', 'RShift )'],
+  [0x7c1c, 'SC_LAPO', 'LAlt ('], [0x7c1d, 'SC_RAPC', 'RAlt )'], [0x7c1e, 'SC_SENT', 'RShift Enter'],
+  [0x7c20, 'OU_AUTO', 'Out Auto'], [0x7c21, 'OU_USB', 'Out USB'],
+  [0x7c50, 'CM_ON', 'Combo On'], [0x7c51, 'CM_OFF', 'Combo Off'], [0x7c52, 'CM_TOGG', 'Combo Toggle'],
+  [0x7c53, 'DM_REC1', 'Rec 1'], [0x7c54, 'DM_REC2', 'Rec 2'], [0x7c55, 'DM_RSTP', 'Rec Stop'], [0x7c56, 'DM_PLY1', 'Play 1'], [0x7c57, 'DM_PLY2', 'Play 2'],
+  [0x7c77, 'TL_LOWR', 'Tri Lower'], [0x7c78, 'TL_UPPR', 'Tri Upper'],
 ];
 const DANGER = new Set([0x7c00, 0x7c01, 0x7c03]);
 
@@ -122,6 +141,24 @@ const singleModName = (mods) => {
   const i = [1, 2, 4, 8].indexOf(bits);
   return i < 0 ? null : `${mods & MOD_RIGHT ? 'R' : 'L'}${MOD_BITS[i][0]}`;
 };
+
+// ---------- 조합 만들기 (화면의 조합 칸) ----------
+
+// mods: 4비트(Ctrl 1, Shift 2, Alt 4, GUI 8), right: 오른쪽 수정자. kc는 기본 키(0x00~0xFF)여야 한다. 맞지 않으면 null.
+const basicKey = (kc) => Number.isInteger(kc) && kc >= 0 && kc <= 0xff;
+const mods5 = (mods, right) => ((mods & 0x0f) ? (mods & 0x0f) | (right ? MOD_RIGHT : 0) : 0);
+function withMods(mods, right, kc) { const m = mods5(mods, right); return m && basicKey(kc) ? (m << 8) | kc : null; }
+function modTap(mods, right, kc) { const m = mods5(mods, right); return m && basicKey(kc) ? RANGE.MOD_TAP[0] | (m << 8) | kc : null; }
+function layerTap(layer, kc) { return Number.isInteger(layer) && layer >= 0 && layer < 16 && basicKey(kc) ? RANGE.LAYER_TAP[0] | (layer << 8) | kc : null; }
+// 조합 코드 → {kind: 'mods' | 'mt' | 'lt', mods, right, layer, kc} (조합이 아니면 null)
+function splitCombo(code) {
+  const kc = code & 0xff;
+  const m = (code >> 8) & 0x1f;
+  if (inRange(code, RANGE.MODS)) return { kind: 'mods', mods: m & 0x0f, right: !!(m & MOD_RIGHT), layer: 0, kc };
+  if (inRange(code, RANGE.MOD_TAP)) return { kind: 'mt', mods: m & 0x0f, right: !!(m & MOD_RIGHT), layer: 0, kc };
+  if (inRange(code, RANGE.LAYER_TAP)) return { kind: 'lt', mods: 0, right: false, layer: (code >> 8) & 0x0f, kc };
+  return null;
+}
 
 // ---------- 이름 ----------
 
@@ -246,8 +283,9 @@ function keycodeGroups(ctx = {}) {
   if (ctx.customKeycodes?.length) {
     groups.push({ id: 'custom', label: t('키보드 전용'), keys: ctx.customKeycodes.slice(0, 64).map((_, i) => entry(RANGE.KB[0] + i)) });
   }
+  groups.push({ id: 'quantum', label: t('기능'), keys: FIXED.filter(([c]) => (c >= 0x7c10 && c < 0x7c80 && c !== 0x7c16 && c !== 0x7c73) || (c >= 0x7480 && c < 0x7500) || c === 0x7013).map(([c]) => entry(c)) });
   groups.push({ id: 'special', label: t('특수'), keys: [0x7c00, 0x7c01, 0x7c02, 0x7c03].map(entry) });
   return groups;
 }
 
-export { isSupportedProtocol, keycodeName, keycodeLabel, parseKeycode, keycodeGroups, RANGE, DANGER };
+export { isSupportedProtocol, keycodeName, keycodeLabel, parseKeycode, keycodeGroups, withMods, modTap, layerTap, splitCombo, RANGE, DANGER, MOD_RIGHT };

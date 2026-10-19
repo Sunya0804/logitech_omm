@@ -2,7 +2,8 @@
 import { ViaDevice, filters } from './via.js';
 import { ViaSession } from './via-session.js';
 import { definitionSources, fetchDefinition, rememberedDefinition, rememberDefinition, forgetDefinition } from './via-definition.js';
-import { parseKeycode } from './via-keycodes.js';
+import { parseKeycode, withMods, modTap, layerTap, splitCombo } from './via-keycodes.js';
+import { exportViaLayout, importViaLayout } from './via-layout-file.js';
 import { encodeMacro } from './via-macro.js';
 import { CODE_TO_USAGE } from './keys.js';
 import { macroEditor, macroSummary, stopRecording, isRecording } from './macro-editor.js';
@@ -10,7 +11,9 @@ import { h, tabs, tabPanel, field, tile, app, shell, busy, ask, toast, download 
 import { t } from './i18n.js';
 
 export { filters };
-export const state = { dev: null, session: null, source: null, error: '', tab: 'keymap', layer: 0, selected: null, group: 'basic', macro: null, capture: false };
+// combo: 조합 만들기 칸. kind 'none'이면 고른 키를 그대로 넣고, 'mods'·'mt'·'lt'면 고른 기본 키를 그 조합으로 감싼다.
+export const state = { dev: null, session: null, source: null, error: '', tab: 'keymap', layer: 0, selected: null, group: 'basic', macro: null, capture: false,
+  combo: { kind: 'none', mods: 0, right: false, layer: 1 } };
 export const connected = () => !!state.dev;
 // 구형 프로토콜도 조명·설정은 편집한다. 키맵은 각 입력 칸에서 별도로 막는다.
 export const canEdit = () => !!state.session;
@@ -126,23 +129,48 @@ function keyboard(test = false) {
     const changed = dirty.some((c) => c.layer === state.layer && (encoder ? c.kind === 'encoder' && c.index === k.encoder && c.cw === cw : c.kind === 'key' && c.row === k.row && c.col === k.col));
     const selected = state.selected && (encoder ? state.selected.encoder === k.encoder && state.selected.cw === cw : state.selected.encoder === undefined && state.selected.row === k.row && state.selected.col === k.col);
     const x = k.x + (encoder && cw ? k.w / 2 : 0);
+    const u = (v) => `calc(${v} * var(--via-unit))`;
+    // ISO 엔터처럼 사각형 두 개로 된 키: 두 사각형을 감싸는 상자에 각각을 그린다 (shape의 x2·y2는 키 위치 기준)
+    const sh = !encoder && k.shape;
+    const box = sh ? { x: Math.min(0, sh.x2), y: Math.min(0, sh.y2), r: Math.max(k.w, sh.x2 + sh.w2), b: Math.max(k.h, sh.y2 + sh.h2) } : null;
+    const [bx, by, bw, bh] = box ? [k.x + box.x, k.y + box.y, box.r - box.x, box.b - box.y] : [x, k.y, encoder ? k.w / 2 : k.w, k.h];
+    const part = (px, py, pw, ph) => h('span', { class: 'via-key-part', style: `left:${u(px - box.x)};top:${u(py - box.y)};width:calc(${pw} * var(--via-unit) - 3px);height:calc(${ph} * var(--via-unit) - 3px);` });
     return h('button', {
-      type: 'button', class: `via-key ${k.color}${code === 1 ? ' transparent' : ''}${changed ? ' changed' : ''}${selected && !test ? ' selected' : ''}`,
+      type: 'button', class: `via-key ${k.color}${sh ? ' shaped' : ''}${code === 1 ? ' transparent' : ''}${changed ? ' changed' : ''}${selected && !test ? ' selected' : ''}`,
       'data-row': k.row, 'data-col': k.col, 'data-encoder': encoder ? k.encoder : null,
       title: `${label.title}${encoder ? cw ? ' ↻' : ' ↺' : ''}`, disabled: !test && (!s.editable || app.busy),
       'aria-pressed': test ? 'false' : String(!!selected),
-      style: `left:calc(${x} * var(--via-unit));top:calc(${k.y} * var(--via-unit));width:calc(${encoder ? k.w / 2 : k.w} * var(--via-unit) - 3px);height:calc(${k.h} * var(--via-unit) - 3px);transform:rotate(${k.r}deg);transform-origin:calc(${k.rx - x} * var(--via-unit)) calc(${k.ry - k.y} * var(--via-unit));`,
-      onclick: () => { if (!test && s.editable && !app.busy) { state.selected = target; refresh(); } },
-    }, encoder ? `${cw ? '↻' : '↺'} ${label.label}` : label.label);
+      style: `left:${u(bx)};top:${u(by)};width:calc(${bw} * var(--via-unit) - 3px);height:calc(${bh} * var(--via-unit) - 3px);transform:rotate(${k.r}deg);transform-origin:${u(k.rx - bx)} ${u(k.ry - by)};`,
+      onclick: () => {
+        if (test || !s.editable || app.busy) return;
+        state.selected = target;
+        // 이미 조합 키면 조합 칸을 그 키의 조합으로 맞춘다
+        const split = splitCombo(code);
+        state.combo = split ? { ...split } : { ...state.combo, kind: 'none' };
+        refresh();
+      },
+    }, ...(sh ? [part(0, 0, k.w, k.h), part(sh.x2, sh.y2, sh.w2, sh.h2), h('span', { class: 'via-key-label', style: `left:${u(-box.x)};top:${u(-box.y)};width:${u(k.w)};height:${u(k.h)};` }, label.label)]
+      : [encoder ? `${cw ? '↻' : '↺'} ${label.label}` : label.label]));
   };
   return h('div', { class: 'via-keyboard-scroll' }, h('div', { class: 'via-keyboard', style: `width:calc(${s.def.width} * var(--via-unit));height:calc(${s.def.height} * var(--via-unit));` },
     s.keys().flatMap((k) => k.encoder !== undefined ? [keyButton(k, false), keyButton(k, true)] : keyButton(k))));
 }
 
-async function chooseCode(code) {
+// 조합 칸이 켜져 있으면 기본 키를 그 조합으로 감싼다. 감쌀 수 없으면 알리고 null.
+function applyCombo(code) {
+  const c = state.combo;
+  if (c.kind === 'none' || code > 0xff) return code;
+  const out = c.kind === 'mods' ? withMods(c.mods, c.right, code) : c.kind === 'mt' ? modTap(c.mods, c.right, code) : layerTap(c.layer, code);
+  if (out === null) toast(c.kind === 'lt' ? t('레이어를 고르세요.') : t('수정자를 하나 이상 고르세요.'), 'error');
+  return out;
+}
+
+async function chooseCode(picked) {
   const s = state.session;
   const target = state.selected;
   if (!s?.editable || !target || app.busy) return;
+  const code = applyCombo(picked);
+  if (code === null) return;
   if (s.label(code).danger && !await ask(t('주의할 키 코드'), [s.label(code).title, t('이 키를 누르면 키보드가 재시작되거나 설정이 초기화될 수 있습니다.')], t('선택'))) return;
   if (state.session !== s || state.selected !== target) return;
   edit(() => {
@@ -152,24 +180,76 @@ async function chooseCode(code) {
   });
 }
 
+// 키보드 모양 선택 칸의 배치(ANSI 텐키리스): [키 코드, 너비]. null은 빈 칸.
+const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => [a + i]);
+const PICK_ROWS = [
+  [[0x29], [null, 1], ...range(0x3a, 0x3d), [null, 0.5], ...range(0x3e, 0x41), [null, 0.5], ...range(0x42, 0x45), [null, 0.25], ...range(0x46, 0x48)],
+  [[0x35], ...range(0x1e, 0x27), [0x2d], [0x2e], [0x2a, 2], [null, 0.25], ...range(0x49, 0x4b)],
+  [[0x2b, 1.5], ...[0x14, 0x1a, 0x08, 0x15, 0x17, 0x1c, 0x18, 0x0c, 0x12, 0x13, 0x2f, 0x30].map((c) => [c]), [0x31, 1.5], [null, 0.25], ...range(0x4c, 0x4e)],
+  [[0x39, 1.75], ...[0x04, 0x16, 0x07, 0x09, 0x0a, 0x0b, 0x0d, 0x0e, 0x0f, 0x33, 0x34].map((c) => [c]), [0x28, 2.25]],
+  [[0xe1, 2.25], ...[0x1d, 0x1b, 0x06, 0x19, 0x05, 0x11, 0x10, 0x36, 0x37, 0x38].map((c) => [c]), [0xe5, 2.75], [null, 1.25], [0x52]],
+  [[0xe0, 1.25], [0xe3, 1.25], [0xe2, 1.25], [0x2c, 6.25], [0xe6, 1.25], [0xe7, 1.25], [0x65, 1.25], [0xe4, 1.25], [null, 0.25], [0x50], [0x51], [0x4f]],
+];
+
+// 조합 만들기: 종류를 고른 뒤 기본 키를 누르면 그 조합이 지정된다
+function comboPanel() {
+  const c = state.combo;
+  const set = (patch) => { state.combo = { ...c, ...patch }; refresh(); };
+  const mods = c.kind === 'mods' || c.kind === 'mt';
+  return h('div', { class: 'via-combo' },
+    field(t('조합'), null, h('select', { id: 'via-combo-kind', onchange: (e) => set({ kind: e.target.value }) },
+      [['none', t('조합 없음 (키 하나)')], ['mods', t('수정자 + 키 (예: Ctrl+C)')], ['mt', t('탭하면 키, 누르고 있으면 수정자')], ['lt', t('탭하면 키, 누르고 있으면 레이어')]]
+        .map(([v, label]) => h('option', { value: v, selected: c.kind === v }, label)))),
+    mods && h('div', { class: 'via-combo-mods', role: 'group', 'aria-label': t('수정자') },
+      [[1, 'Ctrl'], [2, 'Shift'], [4, 'Alt'], [8, 'Win']].map(([bit, name]) => h('label', null,
+        h('input', { type: 'checkbox', 'data-mod': bit, checked: !!(c.mods & bit), onchange: (e) => set({ mods: e.target.checked ? c.mods | bit : c.mods & ~bit }) }), ' ' + name)),
+      h('select', { 'aria-label': t('왼쪽/오른쪽'), onchange: (e) => set({ right: e.target.value === 'right' }) },
+        h('option', { value: 'left', selected: !c.right }, t('왼쪽')), h('option', { value: 'right', selected: c.right }, t('오른쪽')))),
+    c.kind === 'lt' && h('div', { class: 'via-layers', role: 'group', 'aria-label': t('누르고 있을 때 레이어') },
+      h('span', { class: 'via-layers-label' }, t('누르고 있을 때 레이어')),
+      Array.from({ length: Math.min(16, state.session.layers) }, (_, i) => h('button', {
+        type: 'button', class: i === c.layer ? 'active' : '', 'aria-pressed': String(i === c.layer), 'data-combo-layer': i, onclick: () => set({ layer: i }),
+      }, String(i)))),
+    c.kind !== 'none' && h('p', { class: 'hint' }, t('아래에서 기본 키를 누르면 이 조합으로 지정됩니다. 다른 묶음의 키는 그대로 지정됩니다.')));
+}
+
 function codePicker() {
   if (!state.selected || !state.session.editable) return null;
   const s = state.session;
   const groups = s.keycodeGroups();
   const buttons = h('div', { class: 'via-code-grid' });
   const search = h('input', { type: 'text', 'aria-label': t('키 찾기'), placeholder: t('키 찾기'), oninput: () => draw() });
+  const pickButton = (k, width) => h('button', {
+    type: 'button', title: k.title, class: k.danger ? 'danger' : '', disabled: app.busy, 'data-code': k.code, onclick: () => chooseCode(k.code),
+    ...(width ? { style: `width:calc(${width} * var(--pick-unit) - 4px)` } : {}),
+  }, k.label);
   const draw = () => {
     const term = search.value.toLowerCase();
-    const keys = term ? groups.flatMap((g) => g.keys) : (groups.find((g) => g.id === state.group) || groups[0]).keys;
-    buttons.replaceChildren(...keys.filter((k) => `${k.title} ${k.label}`.toLowerCase().includes(term)).map((k) => h('button', {
-      title: k.title, class: k.danger ? 'danger' : '', disabled: app.busy, onclick: () => chooseCode(k.code),
-    }, k.label)));
+    const group = groups.find((g) => g.id === state.group) || groups[0];
+    // 기본 키는 키보드(ANSI 텐키리스) 모양으로 보여 준다
+    if (!term && group.id === 'basic') {
+      const byCode = new Map(group.keys.map((k) => [k.code, k]));
+      buttons.className = 'via-pick-board';
+      buttons.replaceChildren(
+        h('div', { class: 'via-pick-row' }, [0x00, 0x01].map((c) => pickButton(byCode.get(c), 1.5))),
+        ...PICK_ROWS.map((row) => h('div', { class: 'via-pick-row' }, row.map(([c, w = 1]) => (c === null
+          ? h('span', { class: 'via-pick-gap', style: `width:calc(${w} * var(--pick-unit))` })
+          : pickButton(byCode.get(c) || { code: c, ...s.label(c) }, w))))));
+      return;
+    }
+    buttons.className = 'via-code-grid';
+    buttons.replaceChildren(...(term ? groups.flatMap((g) => g.keys) : group.keys)
+      .filter((k) => `${k.title} ${k.label}`.toLowerCase().includes(term)).map((k) => pickButton(k)));
   };
   const error = h('p', { class: 'notice', role: 'alert', hidden: true });
   const direct = h('input', { type: 'text', id: 'via-direct', placeholder: 'LT(1, KC_SPC)', 'aria-label': t('직접 입력') });
   draw();
+  const current = state.selected.custom ? s.customValue(state.selected.custom)
+    : state.selected.encoder !== undefined ? s.encoder(state.layer, state.selected.encoder, state.selected.cw) : s.keycode(state.layer, state.selected.row, state.selected.col);
   return h('section', { class: 'via-picker', 'aria-label': t('키 고르기') },
     h('h3', null, t('키 고르기')),
+    h('p', { class: 'hint' }, t('지금: {name}', { name: s.label(current).title })),
+    comboPanel(),
     h('div', { class: 'via-groups', role: 'group', 'aria-label': t('키 묶음') }, groups.map((g) => h('button', {
       'aria-pressed': String(state.group === g.id), class: state.group === g.id ? 'active' : '',
       onclick: () => { state.group = g.id; refresh(); },
@@ -293,14 +373,36 @@ export function render(el) {
       h('button', { class: 'ghost', disabled: app.busy, onclick: async () => {
         if (isDirty() && !await ask(t('정의 파일 바꾸기'), [t('저장되지 않은 변경을 버릴까요?')], t('바꾸기'))) return;
         suspend(); forgetDefinition(s.def.vendorId, s.def.productId); state.session = null; state.error = ''; shell.refresh();
-      } }, t('정의 파일 바꾸기'))),
+      } }, t('정의 파일 바꾸기')),
+      h('button', { class: 'ghost', id: 'via-layout-export', disabled: app.busy, onclick: () => download(exportViaLayout(s), 'layout', s.def.name) }, t('VIA 파일 내보내기')),
+      h('button', { class: 'ghost', id: 'via-layout-open', disabled: app.busy, onclick: () => root.querySelector('#via-layout-import').click() }, t('VIA 파일 불러오기')),
+      h('input', { type: 'file', id: 'via-layout-import', accept: '.json,application/json', hidden: true,
+        onchange: async (e) => { const file = e.target.files[0]; e.target.value = ''; if (file) await importLayoutFile(file); } })),
     !s.editable && h('p', { class: 'notice' }, t('이 키보드의 VIA 프로토콜({n})은 아직 편집하지 않습니다. 읽기만 합니다.', { n: s.protocol })),
     h('div', { class: 'stats via-stats' }, tile(t('레이어'), s.layers), tile(t('행렬'), `${s.def.rows} × ${s.def.cols}`), tile(t('매크로'), s.macroCount)),
     tabs(names, state.tab, (tab) => { suspend(); state.tab = tab; state.selected = null; refresh(); }, t('키보드 설정')),
     tabPanel(state.tab, body)].filter(Boolean));
-  const fit = () => { root.style.setProperty('--via-unit', `${Math.max(12, Math.min(64, (root.clientWidth - 36) / s.def.width))}px`); };
+  const fit = () => {
+    root.style.setProperty('--via-unit', `${Math.max(12, Math.min(64, (root.clientWidth - 36) / s.def.width))}px`);
+    root.style.setProperty('--pick-unit', `${Math.max(14, Math.min(46, (root.clientWidth - 48) / 18.5))}px`);
+  };
   fit(); resizeObserver = new ResizeObserver(fit); resizeObserver.observe(root);
   if (state.tab === 'test' && document.body.dataset.view === 'config') startTest();
+}
+
+// VIA 레이아웃 파일을 편집본으로 불러온다 (저장해야 기록된다)
+async function importLayoutFile(file) {
+  const s = state.session;
+  if (!s || app.busy) return;
+  try {
+    const json = JSON.parse(await file.text());
+    if (state.session !== s) return;
+    importViaLayout(s, json);
+    toast(t('VIA 레이아웃을 불러왔습니다. 확인한 뒤 저장하세요.'), 'ok');
+  } catch (e) {
+    toast(e instanceof SyntaxError ? t('JSON 파일을 읽을 수 없습니다.') : e.message, 'error');
+  }
+  shell.refresh();
 }
 
 export async function save() {

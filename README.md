@@ -121,6 +121,7 @@ VIA(QMK) 키보드의 키맵·레이아웃 옵션·매크로·조명/설정 메�
   - 예: Qwertykeys QK80 MK2 → `https://cfg.qwertykeys.com/definitions/v3/1363889410.json`
   - QK80 MK2는 제작사 정의 파일을 사이트에 함께 실어 두어 바로 열립니다([definitions/README.md](definitions/README.md), 이 저장소의 라이선스 대상 아님). 사용자가 직접 불러온 파일이 있으면 그쪽을 먼저 씁니다.
 - 키 코드는 VIA 프로토콜 12(QMK 0.19 이후 체계)만 편집합니다. 그보다 오래된 키보드는 읽기만 합니다.
+- VIA 앱의 「Save + Load」 레이아웃 파일(.layout.json)을 불러오고 내보낼 수 있습니다(키맵·인코더·매크로). 불러온 내용은 저장을 눌러야 기록됩니다.
 - 공장 초기화·부트로더 진입·키맵 초기화 명령은 보내지 않습니다. 초기화 같은 메뉴 동작은 값으로 읽지도 않습니다.
 - 실기기(QK80 MK2)에서 읽기 명령의 응답을 확인했고(`tests/fixtures/via-qk80mk2.json`, 정의 파일은 넣지 않음), 쓰기는 가상 기기로만 시험했습니다.
 
@@ -176,6 +177,7 @@ HITS 값의 허용 범위는 기기가 알려 주는 단계 수(HID++ `0x1B0C`)�
 | `js/tester.js` | 마우스 테스트 화면과 판정 로직 |
 | `js/device-images.js` | 홈 카드 제품 사진 목록 |
 | `js/via.js`, `js/via-keycodes.js`, `js/via-definition.js`, `js/via-macro.js` | VIA 키보드 통신, 키 코드 이름표, 정의 파일 해석, 매크로 버퍼 |
+| `js/via-layout-file.js` | VIA 앱 레이아웃 파일(.layout.json)과 매크로 식 변환 |
 | `js/via-session.js` | VIA 키보드의 읽은 값·편집본·저장·백업 (화면이 쓰는 창구) |
 | `js/mock.js`, `js/mock-compx.js`, `js/mock-via.js` | 데모·테스트용 가상 기기 (데모를 고를 때만 불러옴) |
 

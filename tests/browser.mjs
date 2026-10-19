@@ -514,6 +514,31 @@ try {
   assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), 'QK80 MK2');
   assert.match(await page.locator('.via-heading .hint').innerText(), /Bundled definition \(downloaded 2026-10-18\)/);
   assert.equal(await page.evaluate(() => [localStorage.length, vm.log.length].join()), '0,0');
+  // ISO 옵션을 켜면 ISO 엔터를 두 조각으로 그린다
+  await page.evaluate(() => { OMM.viaUi.state.session.setLayoutOption(1, 1); OMM.ui.refresh(); });
+  assert.equal(await page.locator('.via-key.shaped .via-key-part').count(), 2);
+  await page.evaluate(() => { OMM.viaUi.state.session.revert(); OMM.ui.refresh(); });
+  // 키 고르기: 기본 키는 키보드 모양, 조합 칸으로 LT(1, KC_SPC)와 Ctrl+C를 만든다
+  await page.evaluate(() => { OMM.viaUi.state.group = 'basic'; });
+  await page.locator('.via-key[data-row="0"][data-col="0"]').click();
+  assert.equal(await page.locator('.via-pick-board button[data-code="41"]').count(), 1);
+  await page.locator('#via-combo-kind').selectOption('lt');
+  await page.locator('[data-combo-layer="1"]').click();
+  await page.locator('.via-pick-board button[data-code="44"]').click();
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.keycode(0, 0, 0)), 0x412c);
+  await page.locator('#via-combo-kind').selectOption('mods');
+  await page.locator('[data-mod="1"]').check();
+  await page.locator('.via-pick-board button[data-code="6"]').click();
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.keycode(0, 0, 0)), 0x0106);
+  await shot('via-picker.png');
+  // VIA 레이아웃 파일: 내보낸 것을 고쳐 불러오면 편집본에 들어간다
+  const viaLayout = await page.evaluate(async () => { OMM.viaUi.revert(); const F = await import('/js/via-layout-file.js'); return F.exportViaLayout(OMM.viaUi.state.session); });
+  assert.equal(viaLayout.layers[0][0], 'KC_A'); // 가상 키보드의 기본 키맵
+  viaLayout.layers[0][0] = 'C(KC_C)';
+  await page.locator('#via-layout-import').setInputFiles({ name: 'qk80.layout.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(viaLayout)) });
+  await page.waitForFunction(() => OMM.viaUi.state.session.keycode(0, 0, 0) === 0x0106);
+  assert.equal(await page.evaluate(() => vm.log.length), 0);
+  await page.evaluate(() => OMM.viaUi.revert());
   await page.route('**/definitions/**', (route) => route.fulfill({ status: 404, body: '' }));
   await page.evaluate(async () => { window.vm = new (await import('/js/mock-via.js')).MockViaDevice(); await OMM.connectVia([vm]); });
   assert.equal(await page.locator('.via-loader a').first().getAttribute('href'), 'https://cfg.qwertykeys.com/definitions/v3/1363889410.json');

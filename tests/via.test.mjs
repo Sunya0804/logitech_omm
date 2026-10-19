@@ -8,6 +8,7 @@ import * as D from '../js/via-definition.js';
 import * as M from '../js/via-macro.js';
 import { ViaSession } from '../js/via-session.js';
 import { MockViaDevice } from '../js/mock-via.js';
+import * as F from '../js/via-layout-file.js';
 import { setLang } from '../js/i18n.js';
 
 setLang('ko'); // 오류 문구를 한국어 원문으로 맞춘다 (CI는 영어 환경)
@@ -114,7 +115,7 @@ test('protocol 12 keycodes are named, labelled and parsed back', () => {
   assert.equal(K.keycodeLabel(0x7c00).danger, true);
   assert.equal(K.isSupportedProtocol(11), false);
   const groups = K.keycodeGroups({ layers: 4, macroCount: 2, customKeycodes: RAW.customKeycodes, lighting: true });
-  assert.deepEqual(groups.map((g) => g.id), ['basic', 'numpad', 'extra', 'media', 'mouse', 'layers', 'lighting', 'macro', 'custom', 'special']);
+  assert.deepEqual(groups.map((g) => g.id), ['basic', 'numpad', 'extra', 'media', 'mouse', 'layers', 'lighting', 'macro', 'custom', 'quantum', 'special']);
   assert.equal(groups.find((g) => g.id === 'layers').keys.length, 24);
   assert.ok(groups.every((g) => g.keys.every((k) => Number.isInteger(k.code) && k.title)));
 });
@@ -296,4 +297,79 @@ test('the bundled QK80 MK2 definition parses and matches its keyboard', () => {
   // 실기기에서 읽은 메뉴 값이 모두 정의 파일의 항목과 짝이 맞는다
   const heads = new Set(def.menus.items.map((i) => i.head.slice(0, 2).join(',')));
   assert.ok(Object.keys(capture.custom).every((k) => heads.has(k)));
+});
+
+test('the combination builder makes modifier, mod-tap and layer-tap codes', () => {
+  assert.equal(K.withMods(1, false, 0x06), 0x0106); // Ctrl+C
+  assert.equal(K.withMods(3, true, 0x04), 0x1304); // RCtrl+RShift+A
+  assert.equal(K.modTap(2, false, 0x29), 0x2229); // LSFT_T(KC_ESC)
+  assert.equal(K.layerTap(1, 0x2c), 0x412c); // LT(1, KC_SPC)
+  assert.equal(K.withMods(0, false, 0x06), null);
+  assert.equal(K.modTap(1, false, 0x5221), null);
+  assert.equal(K.layerTap(16, 0x04), null);
+  assert.deepEqual(K.splitCombo(0x412c), { kind: 'lt', mods: 0, right: false, layer: 1, kc: 0x2c });
+  assert.deepEqual(K.splitCombo(0x3304), { kind: 'mt', mods: 3, right: true, layer: 0, kc: 0x04 });
+  assert.equal(K.splitCombo(0x5221), null);
+});
+
+test('VIA layout file key names follow the VIA app', () => {
+  const names = {
+    0x29: 'KC_ESC', 0x47: 'KC_SLCK', 0xcd: 'KC_MS_UP', 0xd1: 'KC_MS_BTN1', 0x7c00: 'RESET', 0x0306: 'LCTL(LSFT(KC_C))', 0x1206: 'RSFT(KC_C)',
+    0x2329: 'MT(MOD_LCTL | MOD_LSFT,KC_ESC)', 0x412c: 'LT(1,KC_SPC)', 0x5022: 'LM(1,MOD_LSFT)', 0x52a2: 'OSM(MOD_LSFT)',
+    0x5221: 'MO(1)', 0x7700: 'MACRO(0)', 0x7e03: 'CUSTOM(3)', 0x7820: 'RGB_TOG', 0x6000: '0x6000',
+  };
+  for (const [code, name] of Object.entries(names)) {
+    assert.equal(F.viaKeyName(+code), name);
+    assert.equal(F.parseViaKey(name), +code, name);
+  }
+  // VIA가 쓰는 다른 표기들
+  const more = { 'C(KC_C)': 0x0106, 'S(KC_1)': 0x021e, KC_TILD: 0x0235, 'MEH(KC_A)': 0x0704, 'RCS(KC_A)': 0x1304, MACRO05: 0x7705, USER01: 0x7e01,
+    SPC_FN1: 0x412c, UG_TOGG: 0x7820, RM_TOGG: 0x7842, KC_GESC: 0x7c16, 'kc_a': 0x04, KC_ESCAPE: 0x29 };
+  for (const [name, code] of Object.entries(more)) assert.equal(F.parseViaKey(name), code, name);
+  assert.equal(F.parseViaKey('LCTL(RSFT(KC_A))'), null);
+  assert.equal(F.parseViaKey('NOT_A_KEY'), null);
+  // 실기기 키맵의 모든 코드가 VIA 이름으로 갔다가 그대로 돌아온다
+  for (const code of new Set(captureKeymap)) assert.equal(F.parseViaKey(F.viaKeyName(code)), code, F.viaKeyName(code));
+});
+
+test('VIA macro expressions convert to and from macro steps', () => {
+  const steps = [
+    { kind: 'text', text: 'Hi {x}' }, { kind: 'key', down: true, mods: 0x01, usage: 0 }, { kind: 'key', down: true, mods: 0, usage: 0x06 },
+    { kind: 'key', down: false, mods: 0, usage: 0x06 }, { kind: 'key', down: false, mods: 0x01, usage: 0 }, { kind: 'delay', ms: 250 },
+  ];
+  const text = F.stepsToExpression(steps);
+  assert.equal(text, 'Hi \\{x}{+KC_LCTL}{KC_C}{-KC_LCTL}{250}');
+  assert.deepEqual(F.expressionToSteps(text), steps);
+  // 동시 입력은 차례로 누르고 거꾸로 뗀다
+  assert.deepEqual(F.expressionToSteps('{KC_LCTL,KC_C}'), [
+    { kind: 'key', down: true, mods: 0x01, usage: 0 }, { kind: 'key', down: true, mods: 0, usage: 0x06 },
+    { kind: 'key', down: false, mods: 0, usage: 0x06 }, { kind: 'key', down: false, mods: 0x01, usage: 0 },
+  ]);
+  assert.deepEqual(F.expressionToSteps(''), []);
+  assert.throws(() => F.expressionToSteps('{MO(1)}'), /MO\(1\)/);
+});
+
+test('VIA layout files export the saved state and import into the staged edit', async () => {
+  const { s } = await session({ encoders: { '0,0,0': 0xaa, '0,0,1': 0xa9 } });
+  s.setMacro(1, [{ kind: 'text', text: 'ok' }]);
+  await s.save();
+  const file = JSON.parse(JSON.stringify(F.exportViaLayout(s)));
+  assert.equal(file.vendorProductId, 1363889410);
+  assert.equal(file.layers.length, 2);
+  assert.equal(file.layers[0].length, 6);
+  assert.deepEqual(file.encoders, [[['KC_VOLD', 'KC_VOLU'], ['KC_NO', 'KC_NO']]]);
+  assert.deepEqual(file.macros, ['', 'ok', '', '']);
+  file.layers[1][4] = 'LT(1,KC_SPC)';
+  file.encoders[0][0][1] = 'KC_MUTE';
+  file.macros[0] = '{KC_A}';
+  F.importViaLayout(s, file);
+  assert.deepEqual(s.changes().map((c) => c.kind), ['key', 'encoder', 'macro']);
+  assert.equal(s.keycode(1, 1, 1), 0x412c);
+  s.revert();
+  // 맞지 않는 파일은 편집본을 바꾸지 않는다
+  assert.throws(() => F.importViaLayout(s, { ...file, vendorProductId: 1 }), /다른 키보드/);
+  assert.throws(() => F.importViaLayout(s, { ...file, layers: [['KC_A']] }), /키 수/);
+  assert.throws(() => F.importViaLayout(s, { ...file, layers: [file.layers[0].map(() => 'WHAT')] }), /WHAT/);
+  assert.throws(() => F.importViaLayout(s, { ...file, macros: ['x'.repeat(80), '', '', ''] }), /저장 공간/);
+  assert.equal(s.isDirty(), false);
 });

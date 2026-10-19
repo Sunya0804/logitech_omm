@@ -111,6 +111,12 @@ class ViaSession {
     encodeMacros(macros.map(storedForEncode), this.macroBufferSize); // 넘치거나 넣을 수 없는 단계면 여기서 알리고 바꾸지 않는다
     this.work.macros = macros;
   }
+  // 매크로 여러 칸을 한 번에 바꾼다 (칸마다 바꾸면 중간에 잠시 저장 공간을 넘을 수 있어서). 비어 있는 자리는 그대로 둔다.
+  setMacros(stepsList) {
+    const macros = this.work.macros.map((m, i) => (stepsList[i] ? { steps: clone(stepsList[i]) } : m));
+    encodeMacros(macros.map(storedForEncode), this.macroBufferSize);
+    this.work.macros = macros;
+  }
   setCustom(id, value) {
     const item = this.def.menus.items.find((x) => x.id === id);
     if (!item) throw new Error(t('없는 설정 항목입니다.'));
