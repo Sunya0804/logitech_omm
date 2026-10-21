@@ -5,6 +5,7 @@ import { definitionSources, fetchDefinition, rememberedDefinition, rememberDefin
 import { parseKeycode, withMods, modTap, layerTap, splitCombo } from './via-keycodes.js';
 import { exportViaLayout, importViaLayout } from './via-layout-file.js';
 import { encodeMacro } from './via-macro.js';
+import { stepsToExpression, expressionToSteps } from './via-layout-file.js';
 import { CODE_TO_USAGE } from './keys.js';
 import { macroEditor, macroSummary, stopRecording, isRecording } from './macro-editor.js';
 import { h, tabs, tabPanel, field, tile, app, shell, busy, ask, toast, download } from './ui.js';
@@ -340,12 +341,44 @@ function settingsPanel() {
     state.selected?.custom && codePicker());
 }
 
+// 매크로 텍스트 모드: VIA 앱과 같은 식(Hello{KC_ENT}{100}{KC_LCTL,KC_C})으로 한 칸을 통째로 쓴다.
+// macroDraft: 적용하기 전에 고친 글 (다시 그려도 남도록)
+const macroExpression = (m) => {
+  try { return m.editable ? stepsToExpression(m.steps) : ''; } catch { return ''; }
+};
+
+function macroTextEditor(s) {
+  const i = state.macro;
+  const m = s.macro(i);
+  const value = state.macroDraft ?? macroExpression(m);
+  // 읽을 수 없는 식이나 저장 공간을 넘는 식은 알리고 바꾸지 않는다 (고친 글은 남는다)
+  const apply = () => edit(() => { s.setMacro(i, expressionToSteps(state.macroDraft ?? value)); state.macroDraft = null; });
+  return h('section', { class: 'macro-editor', 'aria-label': `M${i}` },
+    h('div', { class: 'macro-head' }, h('h3', null, `M${i}`)),
+    !m.editable && h('p', { class: 'notice' }, t('읽을 수 없는 명령이 있습니다. 새 매크로를 만들면 이 칸을 덮어씁니다.')),
+    h('textarea', {
+      id: 'via-macro-text', rows: 4, spellcheck: 'false', disabled: app.busy, 'aria-label': t('M{n} 매크로 식', { n: i }),
+      oninput: (e) => { state.macroDraft = e.target.value; },
+    }, value), // textarea는 value 속성을 쓰지 않고 내용을 초기값으로 쓴다
+    h('p', { class: 'hint' }, t('글자는 그대로 입력되고, {KC_ENT}는 키 한 번, {+KC_LSFT}/{-KC_LSFT}는 누르기/떼기, {KC_LCTL,KC_C}는 동시 입력, {100}은 100 ms 대기입니다. 중괄호를 글자로 넣으려면 앞에 역슬래시를 붙입니다.')),
+    h('div', { class: 'row-actions' },
+      h('button', { id: 'via-macro-apply', class: 'primary', disabled: app.busy, onclick: apply }, t('적용')),
+      h('button', { class: 'ghost', disabled: app.busy, onclick: () => { state.macroDraft = null; refresh(); } }, t('되돌리기')),
+      h('button', { class: 'ghost', onclick: () => { state.macro = null; state.macroDraft = null; refresh(); } }, t('닫기'))));
+}
+
 function macrosPanel() {
   const s = state.session;
+  const pick = (i) => { stopRecording(); state.macro = i; state.macroDraft = null; refresh(); };
+  const mode = (text) => { stopRecording(); state.macroText = text; state.macroDraft = null; refresh(); };
   return h('div', null,
     h('p', { class: 'hint' }, t('매크로 사용량: {used} / {max} 바이트', { used: s.macroBytesUsed(), max: s.macroBufferSize })),
-    h('div', { class: 'via-macros' }, Array.from({ length: s.macroCount }, (_, i) => h('button', { disabled: app.busy, onclick: () => { stopRecording(); state.macro = i; refresh(); } }, `M${i}`, h('small', null, macroSummary(s.macro(i)))))),
-    state.macro !== null && macroEditor({
+    h('div', { class: 'via-macros' }, Array.from({ length: s.macroCount }, (_, i) => h('button', { disabled: app.busy, onclick: () => pick(i) }, `M${i}`, h('small', null, macroSummary(s.macro(i)))))),
+    state.macro !== null && h('div', { class: 'via-layers', role: 'group', 'aria-label': t('편집 방식') },
+      h('button', { id: 'via-macro-mode-steps', 'aria-pressed': String(!state.macroText), class: state.macroText ? '' : 'selected', onclick: () => mode(false) }, t('단계')),
+      h('button', { id: 'via-macro-mode-text', 'aria-pressed': String(!!state.macroText), class: state.macroText ? 'selected' : '', onclick: () => mode(true) }, t('텍스트'))),
+    state.macro !== null && state.macroText && macroTextEditor(s),
+    state.macro !== null && !state.macroText && macroEditor({
       title: `M${state.macro}`, current: () => s.macro(state.macro), max: s.macroBufferSize, minDelay: 0, allowText: true,
       size: (steps) => { try { return encodeMacro(steps).length; } catch { return Infinity; } },
       readOnly: app.busy, onChange: (steps) => edit(() => s.setMacro(state.macro, steps)), onClose: () => { state.macro = null; refresh(); }, rerender: refresh,

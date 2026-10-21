@@ -681,4 +681,11 @@ export default {
   "기기가 프로필 {n}(으)로 돌아오지 않아 저장하지 않았습니다. 편집 내용은 그대로 남아 있습니다.": "The device did not switch back to profile {n}, so nothing was saved. Your edits are still here.",
   "프로필 {n}의 백업에 이 기기에서 쓸 수 없는 값이 있어 불러오지 않았습니다.": "The backup of profile {n} has values this device cannot use, so it was not loaded.",
   "다른 기기({device})에서 내보낸 백업입니다. 저장하기 전에 확인하세요.": "This backup was exported from another device ({device}). Check it before saving.",
+  "M{n} 매크로 식": "M{n} macro expression",
+  "글자는 그대로 입력되고, {KC_ENT}는 키 한 번, {+KC_LSFT}/{-KC_LSFT}는 누르기/떼기, {KC_LCTL,KC_C}는 동시 입력, {100}은 100 ms 대기입니다. 중괄호를 글자로 넣으려면 앞에 역슬래시를 붙입니다.": "Text is typed as is. {KC_ENT} taps a key, {+KC_LSFT}/{-KC_LSFT} press/release, {KC_LCTL,KC_C} is a chord and {100} waits 100 ms. To type a brace as text, put a backslash before it.",
+  "적용": "Apply",
+  "닫기": "Close",
+  "편집 방식": "Editing mode",
+  "단계": "Steps",
+  "텍스트": "Text",
 };

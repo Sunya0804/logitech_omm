@@ -511,6 +511,20 @@ try {
   await page.locator('.macro-steps input[type=text]').fill('한글');
   await page.locator('.macro-steps input[type=text]').blur();
   assert.equal(await page.evaluate(() => OMM.viaUi.state.session.macro(0).steps[0].text), 'Hello VIA!');
+  // 텍스트 모드: 저장된 매크로를 VIA 식으로 보여 주고, 고친 식을 적용하면 단계가 된다. 잘못된 식은 바꾸지 않는다.
+  await page.locator('#via-macro-mode-text').click();
+  assert.equal(await page.locator('#via-macro-text').inputValue(), 'Hello VIA!');
+  await page.locator('#via-macro-text').fill('Hi{KC_ENT}{50}{KC_LCTL,KC_C}');
+  await page.locator('#via-macro-apply').click();
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.macro(0).steps.map((s) => s.kind).join()), 'text,key,key,delay,key,key,key,key');
+  await page.locator('#via-macro-text').fill('{NOT_A_KEY}');
+  await page.locator('#via-macro-apply').click();
+  assert.match(await page.locator('#toasts').textContent(), /NOT_A_KEY/);
+  assert.equal(await page.locator('#via-macro-text').inputValue(), '{NOT_A_KEY}');
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.macro(0).steps[0].text), 'Hi');
+  await page.locator('#via-macro-mode-steps').click();
+  assert.equal(await page.locator('.macro-steps input[type=text]').inputValue(), 'Hi');
+  await page.evaluate(() => { OMM.viaUi.revert(); OMM.viaUi.state.macroText = false; document.querySelector('#toasts').replaceChildren(); });
   // 백업은 읽은 값만 내보내고, 새 연결에 불러오면 편집본이 된다.
   const viaDownload = page.waitForEvent('download');
   await page.locator('#btn-export').click();
