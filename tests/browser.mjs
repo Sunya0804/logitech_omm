@@ -176,6 +176,38 @@ try {
   assert.equal(await page.evaluate(() => OMM.compxUi.state.extras.profile), 3);
   assert.match(await page.locator('#toasts').textContent(), /프로필 전환을 확인하지 않았습니다/);
   await page.evaluate(() => document.querySelector('#toasts').replaceChildren());
+  // 편집하는 동안 마우스에서 프로필이 바뀌면 다른 프로필에 쓰지 않는다: 물어본 뒤 되돌려서 원래 프로필에 저장한다
+  await page.evaluate(() => {
+    atk._handle = atk._originalHandle;
+    OMM.compx.setScalar(OMM.compxUi.state.work, OMM.compx.FLASH.debounce, 8); OMM.ui.refresh();
+    atk.profile = 1; window.bank1 = Array.from(atk.banks[1]);
+  });
+  await page.locator('#btn-save').click();
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => /프로필이 4에서 2/.test(document.querySelector('#confirm-body')?.innerText || ''));
+  await page.locator('#confirm button[value=cancel]').click();
+  await page.waitForFunction(() => !OMM.state.busy);
+  assert.equal(await page.evaluate(() => [atk.writes.length, atk.profile, OMM.compxUi.isDirty()].join()), '0,1,true');
+  await page.locator('#btn-save').click();
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => /프로필이 4에서 2/.test(document.querySelector('#confirm-body')?.innerText || ''));
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy && !OMM.compxUi.isDirty());
+  assert.equal(await page.evaluate(() => [atk.profile, atk.banks[3][OMM.compx.FLASH.debounce], atk.banks[1].every((v, i) => v === bank1[i])].join()), '3,8,true');
+  // 프로필로 돌아오지 않으면 아무것도 쓰지 않는다
+  await page.evaluate(() => {
+    atk.writes.length = 0;
+    OMM.compx.setScalar(OMM.compxUi.state.work, OMM.compx.FLASH.debounce, 4); OMM.ui.refresh();
+    atk.profile = 0; atk._handle = function(p, r) { if (p[0] !== 0x0f) this._originalHandle(p, r); };
+  });
+  await page.locator('#btn-save').click();
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => /프로필이 4에서 1/.test(document.querySelector('#confirm-body')?.innerText || ''));
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy);
+  assert.match(await page.locator('#toasts').textContent(), /돌아오지 않아 저장하지 않았습니다/);
+  assert.equal(await page.evaluate(() => [atk.writes.length, OMM.compxUi.isDirty()].join()), '0,true');
+  await page.evaluate(() => { atk._handle = atk._originalHandle; atk.profile = 3; OMM.compxUi.revert(); document.querySelector('#toasts').replaceChildren(); });
 
   await page.evaluate(async () => {
     const c = OMM.compx;

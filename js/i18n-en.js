@@ -556,4 +556,9 @@ export default {
   "이 기기에는 아직 사용자 프로필이 없어(공장 상태) 기기에 내장된 프로필을 보여 줍니다. 체크섬 계산이 이 기기와 맞는지는 처음 저장할 때 확인됩니다.": "This device has no user profiles yet (factory state), so its built-in profile is shown. Whether the checksum matches this device is confirmed on the first save.",
   "이 기기의 프로필 형식({format})은 실제 기기로 확인하지 못했습니다.": "The profile format of this device ({format}) has not been verified on a real device.",
   "이해하고 편집을 허용합니다. 먼저 백업을 내보내세요.": "I understand and allow editing. Export a backup first.",
+  "기기가 지금 쓰고 있는 프로필을 확인하지 못했습니다.": "Could not check which profile the device is using.",
+  "편집하는 동안 기기의 프로필이 {from}에서 {to}(으)로 바뀌었습니다.": "The device switched from profile {from} to profile {to} while you were editing.",
+  "프로필 {n}(으)로 되돌린 뒤 그 프로필에 저장합니다.": "GOMM will switch back to profile {n} and save there.",
+  "되돌리고 저장": "Switch back and save",
+  "기기가 프로필 {n}(으)로 돌아오지 않아 저장하지 않았습니다. 편집 내용은 그대로 남아 있습니다.": "The device did not switch back to profile {n}, so nothing was saved. Your edits are still here.",
 };

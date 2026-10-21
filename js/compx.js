@@ -391,6 +391,12 @@ class CompxDevice {
     return this.accepted(CMD.SET_PROFILE, (p) => p.set([1, index], 4), '프로필 전환');
   }
 
+  // 기기가 지금 쓰고 있는 프로필(0부터). 마우스 버튼으로도 바뀌므로 기록하기 직전에 다시 확인한다. 읽지 못하면 null.
+  async readProfile() {
+    const r = await this.exchange(CMD.GET_PROFILE).catch(() => null);
+    return r && r[1] === 0 && r[5] < PROFILE_COUNT ? r[5] : null;
+  }
+
   // 배터리만 다시 읽는다. 수신기에 제어를 요청하지 않고 상태만 물어서, 마우스가 절전 중이거나
   // 수신기가 사용 중이면 깨우지 않고 null을 돌려준다. 실기기에서 절전 중인 마우스는 배터리 요청에 답하지 않았다.
   async readBattery() {
