@@ -224,11 +224,6 @@ function setKey(image, index, cls, param) {
   image.set([...bytes, check(sumOf(bytes))], FLASH.keys + 4 * index);
 }
 
-function keyLabel(key) {
-  const known = KEY_ACTIONS.find(([cls, param]) => cls === key.cls && param === key.param);
-  return known ? known[2] : `기타 (${key.cls}:0x${key.param.toString(16).padStart(4, '0')})`;
-}
-
 function parse(image, model = MODELS.vgn) {
   const stages = [];
   for (let i = 0; i < DPI_SLOTS; i++) stages.push(decodeDpi(image, i, model));
@@ -426,7 +421,7 @@ const filters = VENDOR_IDS.map((vendorId) => ({ vendorId }));
 export {
   filters, VENDOR_IDS, VENDOR_VGN, VENDOR_ATK, MODELS, modelFor, FLASH, IMAGE_LENGTH, DPI_SLOTS, DPI_MIN, DPI_MAX, DPI_STEP, DEBOUNCE_MAX,
   BUTTON_NAMES, RATES, LOD, SLEEP, KEY_ACTIONS, PROFILE_COUNT, DPI_LIGHT, DPI_LIGHT_SPEED_MAX, BRIGHTNESS,
-  parse, decodeRate, encodeRate, decodeDpi, setDpi, snapDpi, setScalar, decodeKey, setKey, keyLabel, diffRuns, check,
+  parse, decodeRate, encodeRate, decodeDpi, setDpi, snapDpi, setScalar, decodeKey, setKey, diffRuns, check,
   decodeDpiColor, setDpiColor, setDpiLightKind,
   CompxDevice,
 };

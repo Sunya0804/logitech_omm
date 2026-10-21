@@ -7,7 +7,7 @@
 - 제조사 M HUB: <https://www.mchose.com.cn/assets/purify.es-DfJclCKp.js>
   - 다운로드 SHA-256: `ec61056f775349abd7e650466836c714d026d36ef314ef6b70b0de5d563e70b7`
   - `km` 기종표의 이름, PID, 링크별 보고율 상한, DPI 상한, LOD 선택지 데이터만 옮겼습니다. 제조사 실행 코드를 포함하지 않습니다.
-- 2026-10-14 로컬 실기기 읽기: `tests/fixtures/mchose-hardware.json`.
+- 2026-10-14 로컬 실기기 읽기: `js/mock-mchose.json`.
   시리얼 번호·Windows 장치 경로는 저장하지 않았습니다.
 
 ## 등록된 계열

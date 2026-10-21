@@ -249,6 +249,7 @@ function fromHex(hex) {
 }
 
 export {
+  plausible,
   LAYOUTS, LAYOUT_BY_FORMAT, DPI_SLOTS, NAME_CHARS, ANALOG_MAX,
   crc16, hasValidCrc, finalize, sameData, parse, detectLayout,
   setReportRate, setDpi, setName, setBunnyHop, analogBytes, getBinding, setBinding, getAnalog, setAnalog, decodeBinding, encodeBinding,

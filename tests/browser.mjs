@@ -27,8 +27,8 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.waitForFunction(() => !!window.OMM?.mchoseUi);
   await page.evaluate(async () => {
-    const { CapturedMouse } = await import('/tests/mchose-fixture.mjs');
-    window.captures = await (await fetch('/tests/fixtures/mchose-hardware.json')).json();
+    const { CapturedMouse } = await import('/js/mock-mchose.js');
+    window.captures = await (await fetch('/js/mock-mchose.json')).json();
     window.makeMouse = i => new CapturedMouse(window.captures[i]);
     const timer = window.setTimeout;
     window.setTimeout = (fn, ms, ...args) => timer(fn, ms >= 8000 ? ms : Math.min(ms, 5), ...args);
@@ -137,6 +137,24 @@ try {
   assert.deepEqual(backup.macros.map((m) => [m.index, m.layer, m.button]), [[0, 'buttons', 10]]);
   await page.evaluate(async (b) => { await OMM.logitech.importBackup(new File([JSON.stringify(b)], 'b.json')); }, backup);
   assert.equal(await page.evaluate(() => OMM.logitech.isDirty()), false);
+  // 버튼 수가 다르거나 이 기기의 DPI 범위로 읽히지 않는 백업은 받지 않는다
+  const rejected = await page.evaluate(async (b) => {
+    const P = await import('/js/profile.js');
+    const L = OMM.logitech.state.layout;
+    const raw = P.fromHex(b.profiles[0].data);
+    raw.set([0xf0, 0xff], L.dpi); // 첫 DPI 단계를 65,520으로
+    const bad = { ...b, profiles: [{ ...b.profiles[0], data: P.toHex(P.finalize(raw)) }] };
+    const out = [];
+    for (const f of [{ ...b, buttonCount: 99 }, bad]) {
+      document.querySelector('#toasts').replaceChildren();
+      await OMM.logitech.importBackup(new File([JSON.stringify(f)], 'b.json'));
+      out.push(document.querySelector('#toasts').textContent);
+    }
+    return [...out, OMM.logitech.isDirty()];
+  }, backup);
+  assert.match(rejected[0], /호환되지 않는 백업/);
+  assert.match(rejected[1], /쓸 수 없는 값/);
+  assert.equal(rejected[2], false);
   await page.evaluate(async () => { ({ MockCompxDevice: window.MockCompxDevice } = await import('/js/mock-compx.js')); await OMM.connectCompx([new MockCompxDevice()]); });
   assert.equal(await page.evaluate(() => OMM.compxUi.connected()), true);
   assert.equal(await page.locator('#sidebar .profile').count(), 4);

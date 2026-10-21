@@ -374,7 +374,7 @@ export function exportBackup() {
   const { desc } = st;
   download({
     type: 'omm-web-backup', version: 1, device: st.name, exportedAt: new Date().toISOString(),
-    profileFormatId: desc.profileFormatId, sectorSize: desc.sectorSize,
+    profileFormatId: desc.profileFormatId, sectorSize: desc.sectorSize, buttonCount: desc.buttonCount,
     profiles: st.profiles.map((p) => ({ index: p.index, enabled: p.enabled, data: p.raw ? P.toHex(P.finalize(p.raw.slice())) : null })),
     // 매크로는 기기마다 들어 있는 섹터가 달라서, 버튼별로 단계만 담는다 (한 섹터 형식, 위치 0부터).
     macros: macroSupported() ? st.profiles.filter((p) => p.raw).flatMap((p) => layers().flatMap((layer) =>
@@ -444,14 +444,21 @@ export async function exportDiagnostics() {
 
 export async function importBackup(file) {
   try {
+    if (!canEdit()) throw new Error(t('편집을 허용한 뒤에 불러올 수 있습니다.'));
     const b = JSON.parse(await file.text());
     if (b.type !== 'omm-web-backup' || !Array.isArray(b.profiles)) throw new Error(t('GOMM 웹 백업 파일이 아닙니다.'));
-    if (b.profileFormatId !== st.desc.profileFormatId || b.sectorSize !== st.desc.sectorSize) {
+    // 형식이 같아도 버튼 수가 다르면 버튼 위치가 어긋난다. 예전 백업에는 버튼 수가 없어서 값 검사에 맡긴다.
+    if (b.profileFormatId !== st.desc.profileFormatId || b.sectorSize !== st.desc.sectorSize
+      || (b.buttonCount !== undefined && b.buttonCount !== st.desc.buttonCount)) {
       throw new Error(t('이 기기와 호환되지 않는 백업입니다 ({device}).', { device: b.device || t('알 수 없는 기기') }));
     }
     const loaded = b.profiles.filter((e) => st.profiles[e.index] && e.data).map((e) => {
       const data = P.fromHex(e.data);
       if (data.length !== st.desc.sectorSize || !P.hasValidCrc(data)) throw new Error(t('프로필 {n}의 백업 데이터가 손상되었습니다.', { n: e.index + 1 }));
+      // 이 기기의 DPI 범위·버튼 할당으로 읽히지 않으면 (다른 기종의 백업 등) 받지 않는다.
+      if (!P.plausible(data, st.layout, st.desc.buttonCount, st.dpiRange)) {
+        throw new Error(t('프로필 {n}의 백업에 이 기기에서 쓸 수 없는 값이 있어 불러오지 않았습니다.', { n: e.index + 1 }));
+      }
       return [st.profiles[e.index], data, !!e.enabled];
     });
     // 매크로: 이 기기에서 해석할 수 있는 것만 편집본으로 옮긴다. 저장할 때 빈 섹터에 새로 기록된다.
@@ -471,7 +478,8 @@ export async function importBackup(file) {
     }
     for (const [p, layer, i, steps] of macros) setPending(p, layer, i, steps);
     st.macroEdit = null;
-    toast(t('프로필 {n}개를 불러왔습니다. 「기기에 저장」을 눌러야 기기에 반영됩니다.', { n: loaded.length }), 'ok');
+    toast(t('프로필 {n}개를 불러왔습니다. 「기기에 저장」을 눌러야 기기에 반영됩니다.', { n: loaded.length })
+      + (b.device && b.device !== st.name ? ' ' + t('다른 기기({device})에서 내보낸 백업입니다. 저장하기 전에 확인하세요.', { device: b.device }) : ''), 'ok');
   } catch (e) {
     toast(e instanceof SyntaxError ? t('백업 파일을 읽지 못했습니다.') : e.message, 'error');
   }

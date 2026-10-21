@@ -679,4 +679,6 @@ export default {
   "프로필 {n}(으)로 되돌린 뒤 그 프로필에 저장합니다.": "GOMM will switch back to profile {n} and save there.",
   "되돌리고 저장": "Switch back and save",
   "기기가 프로필 {n}(으)로 돌아오지 않아 저장하지 않았습니다. 편집 내용은 그대로 남아 있습니다.": "The device did not switch back to profile {n}, so nothing was saved. Your edits are still here.",
+  "프로필 {n}의 백업에 이 기기에서 쓸 수 없는 값이 있어 불러오지 않았습니다.": "The backup of profile {n} has values this device cannot use, so it was not loaded.",
+  "다른 기기({device})에서 내보낸 백업입니다. 저장하기 전에 확인하세요.": "This backup was exported from another device ({device}). Check it before saving.",
 };

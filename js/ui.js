@@ -57,6 +57,8 @@ export async function busy(message, fn) {
   const setMsg = (m) => ($('#busy-msg').textContent = m);
   setMsg(message);
   $('#busy').hidden = false;
+  // 덮개는 마우스만 막으므로, 키보드로 버튼을 누르지 못하게 화면을 비활성으로 둔다.
+  for (const id of ['#rail', '#stage']) $(id).inert = true;
   try {
     await app.background;
     await fn(setMsg);
@@ -68,6 +70,7 @@ export async function busy(message, fn) {
   } finally {
     app.busy = false;
     $('#busy').hidden = true;
+    for (const id of ['#rail', '#stage']) $(id).inert = false;
   }
 }
 

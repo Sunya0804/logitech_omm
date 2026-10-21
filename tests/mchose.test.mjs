@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { CapturedMouse } from './mchose-fixture.mjs';
+import { CapturedMouse } from '../js/mock-mchose.js';
 import { catalog, createClient, saveChanges, changes, knownStatus, profileNameFrom } from '../js/mchose.js';
 import { V3_PIDS } from '../js/mchose-models.js';
 import { setLang } from '../js/i18n.js';
 // 오류 문구를 한국어 원문으로 확인하므로, 영어 환경(CI)에서도 화면 언어를 한국어로 고정한다.
 setLang('ko');
-const captures = JSON.parse(fs.readFileSync(new URL('./fixtures/mchose-hardware.json', import.meta.url)));
+const captures = JSON.parse(fs.readFileSync(new URL('../js/mock-mchose.json', import.meta.url)));
 const originalTimeout = globalThis.setTimeout;
 globalThis.setTimeout = (fn, ms, ...args) => originalTimeout(fn, Math.min(ms, 1), ...args);
 

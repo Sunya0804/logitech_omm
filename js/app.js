@@ -19,6 +19,7 @@ const active = () => UIS.find((ui) => ui.connected()) || null;
 
 // 다른 기기와의 연결을 끊고 ui로 연결한다. 실패하면 그 화면의 상태도 비운다.
 async function connectWith(ui, arg, message) {
+  if (app.busy) return false; // 기기와 통신하는 중에 연결을 끊지 않는다
   await disconnect();
   const ok = await busy(message, (setMsg) => ui.connect(arg, setMsg));
   if (!ok) await ui.disconnect();
@@ -89,8 +90,8 @@ async function connectDemo(kind) {
       const { MockTransport } = await import('./mock.js');
       await connectWith(logitech, new MockTransport('analog'), t('기기 검색 중…'));
     } else if (kind === 'mchose') {
-      const { CapturedMouse } = await import(new URL('tests/mchose-fixture.mjs', document.baseURI).href);
-      const captures = await (await fetch('tests/fixtures/mchose-hardware.json')).json();
+      const { CapturedMouse } = await import('./mock-mchose.js');
+      const captures = await (await fetch(new URL('./mock-mchose.json', import.meta.url))).json();
       await connectWith(mchoseUi, [new CapturedMouse(captures[0])], t('MCHOSE 기기 읽는 중…'));
     } else {
       const { MockCompxDevice } = await import('./mock-compx.js');

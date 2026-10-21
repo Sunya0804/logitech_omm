@@ -19,7 +19,7 @@ export async function connect(devices) {
   state.unlocked = false; state.tab = 'overview';
 }
 export async function disconnect() {
-  if (state.client) await state.client.close();
+  if (state.client) await state.client.close().catch(() => {}); // 이미 빠진 기기면 닫기가 실패한다
   Object.assign(state, { client: null, original: null, work: null, unlocked: false, stale: false });
 }
 // 배터리 잔량만 다시 읽는다. 연결할 때 잔량을 읽지 못한 기기는 묻지 않는다. 새 값을 받았으면 true.
