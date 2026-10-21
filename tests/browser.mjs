@@ -642,6 +642,50 @@ try {
   await page.getByRole('tab', { name: 'Lighting / Settings', exact: true }).click();
   assert.equal(await page.locator('[data-setting="enabled"] input').isEnabled(), true);
   assert.equal(await page.locator('[data-setting="shortcut"] button').isDisabled(), true);
+  // Vial: 정의 파일은 키보드에서 읽는다. 탭 댄스·QMK 설정은 잠겨 있어도 저장하고, 매크로는 잠금을 푼 뒤에 저장한다.
+  await page.evaluate(async () => {
+    const { MockViaDevice } = await import('/js/mock-via.js');
+    const { packed } = await import('/js/vial-demo.js');
+    window.vv = new MockViaDevice({ vendorId: 0xfeed, productId: 0x0060, productName: 'Vial 60', rows: 5, cols: 15, macroCount: 4, macroBufferSize: 128,
+      vial: { packed, tapDance: [{ onTap: 0x04, onHold: 0, onDoubleTap: 0, onTapHold: 0, term: 200 }], combos: [{ keys: [0, 0, 0, 0], output: 0 }], settings: { 7: [2, 200], 21: [4, 0] } } });
+    await OMM.connectVia([vv]);
+  });
+  await page.waitForSelector('.via-lock');
+  assert.match(await page.locator('.via-heading .hint').innerText(), /Vial 6/);
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), 'GOMM Vial 60');
+  await page.getByRole('tab', { name: 'Tap dance & combos', exact: true }).click();
+  await page.locator('[data-vial="tapDance:0:onHold"]').click();
+  await page.locator('.via-pick-board button[data-code="225"]').click();
+  await page.locator('[data-td="0"] input[type=number]').fill('180');
+  await page.locator('[data-td="0"] input[type=number]').dispatchEvent('change');
+  assert.deepEqual(await page.evaluate(() => OMM.viaUi.state.session.vialEntry('tapDance', 0)), { onTap: 0x04, onHold: 0xe1, onDoubleTap: 0, onTapHold: 0, term: 180 });
+  await shot('vial-tapdance.png');
+  await page.getByRole('tab', { name: 'QMK settings', exact: true }).click();
+  await page.locator('[data-qsid="21"][data-bit="7"]').check();
+  await page.locator('[data-qsid="7"]').fill('250');
+  await page.locator('[data-qsid="7"]').dispatchEvent('change');
+  await page.locator('#btn-save').click();
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy && !OMM.viaUi.isDirty());
+  assert.deepEqual(await page.evaluate(() => [vv.vial.tapDance[0].onHold, vv.vial.tapDance[0].term, vv.vial.settings[21][1], vv.vial.settings[7][1]]), [0xe1, 180, 128, 250]);
+  await page.getByRole('tab', { name: 'Key tester', exact: true }).click();
+  assert.match(await page.locator('#editor .notice').last().innerText(), /Unlock the Vial keyboard/);
+  // 매크로를 저장하려 하면 잠금 풀기 화면이 열리고, 정해진 키를 누르고 있으면 풀린다
+  await page.evaluate(() => { OMM.viaUi.state.session.setMacro(0, [{ kind: 'text', text: 'hi' }]); OMM.ui.refresh(); });
+  await page.locator('#btn-save').click();
+  await page.waitForSelector('.via-unlock');
+  assert.equal(await page.locator('.via-key.unlock-target').count(), 2);
+  await shot('vial-unlock.png');
+  await page.evaluate(() => { vv.matrix = [[0, 0], [0, 1]]; });
+  await page.waitForFunction(() => !OMM.viaUi.state.unlocking && !OMM.viaUi.state.session.locked());
+  await page.evaluate(() => { vv.matrix = null; });
+  await page.locator('#btn-save').click();
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => !OMM.state.busy && !OMM.viaUi.isDirty());
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(vv.macroBuffer.slice(0, 2))), 'hi');
+  assert.equal(await page.evaluate(() => vv.log.some((p) => p[0] === 0xfe && [0x08, 0x0c].includes(p[1]))), false);
+  await page.evaluate(() => OMM.connectDemo('vial'));
+  assert.equal(await page.evaluate(() => OMM.viaUi.connected() && OMM.state.demo && OMM.viaUi.state.session.vialCounts.tapDance), 4);
   await page.evaluate(() => OMM.connectDemo('via'));
   assert.equal(await page.evaluate(() => OMM.viaUi.connected() && OMM.state.demo), true);
   console.log('Browser: VIA keymap/layers/encoder, staged writes, danger confirmation, layout, showIf/custom save, ASCII macro, backup, matrix polling, definition loading, protocol 11, demo, English and 390px passed.');

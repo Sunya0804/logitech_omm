@@ -279,6 +279,7 @@ function keycodeGroups(ctx = {}) {
     });
   }
   if (ctx.lighting) groups.push({ id: 'lighting', label: t('조명'), keys: FIXED.filter(([c]) => c >= 0x7800 && c < 0x7900).map(([c]) => entry(c)) });
+  if (ctx.tapDanceCount) groups.push({ id: 'tapdance', label: t('탭 댄스'), keys: range(0, Math.min(256, ctx.tapDanceCount) - 1).map((i) => entry(RANGE.TAP_DANCE[0] + i)) });
   if (ctx.macroCount) groups.push({ id: 'macro', label: t('매크로'), keys: range(0, Math.min(128, ctx.macroCount) - 1).map((i) => entry(RANGE.MACRO[0] + i)) });
   if (ctx.customKeycodes?.length) {
     groups.push({ id: 'custom', label: t('키보드 전용'), keys: ctx.customKeycodes.slice(0, 64).map((_, i) => entry(RANGE.KB[0] + i)) });

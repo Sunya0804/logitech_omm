@@ -1,6 +1,7 @@
 // VIA 화면. 모든 편집·저장은 ViaSession을 통하고 정의 파일의 문자열은 텍스트로만 넣는다.
 import { ViaDevice, filters } from './via.js';
-import { ViaSession } from './via-session.js';
+import { ViaSession, readVialDefinition } from './via-session.js';
+import { SETTINGS as QMK_SETTINGS } from './vial-settings.js';
 import { definitionSources, fetchDefinition, rememberedDefinition, rememberDefinition, forgetDefinition } from './via-definition.js';
 import { parseKeycode, withMods, modTap, layerTap, splitCombo } from './via-keycodes.js';
 import { exportViaLayout, importViaLayout } from './via-layout-file.js';
@@ -14,7 +15,8 @@ import { t } from './i18n.js';
 export { filters };
 // combo: 조합 만들기 칸. kind 'none'이면 고른 키를 그대로 넣고, 'mods'·'mt'·'lt'면 고른 기본 키를 그 조합으로 감싼다.
 export const state = { dev: null, session: null, source: null, error: '', tab: 'keymap', layer: 0, selected: null, group: 'basic', macro: null, capture: false,
-  combo: { kind: 'none', mods: 0, right: false, layer: 1 }, previous: null };
+  combo: { kind: 'none', mods: 0, right: false, layer: 1 }, previous: null, vial: null, unlocking: false };
+// vial: Vial 키보드면 dev.vialId()의 결과 (정의 파일은 키보드에서 읽는다), unlocking: 잠금 풀기 화면을 보이는 중
 // previous: 「정의 파일 바꾸기」를 누르기 전의 {session, source}. 불러오기 화면에서 그대로 돌아갈 때 쓴다.
 export const connected = () => !!state.dev;
 // 구형 프로토콜도 조명·설정은 편집한다. 키맵은 각 입력 칸에서 별도로 막는다.
@@ -23,11 +25,12 @@ export const isDirty = () => state.session?.isDirty() || false;
 export const ownsDevice = (d) => state.dev?.dev === d;
 export const refreshBattery = async () => false;
 export const renderProfiles = () => false;
-export const summary = () => ({ kind: 'keyboard', name: state.session?.def.name || state.dev?.name || 'VIA', modeText: t('VIA 키보드'), dpi: null, rate: null, profileLabel: null, battery: null });
+export const summary = () => ({ kind: 'keyboard', name: state.session?.def.name || state.dev?.name || 'VIA', modeText: state.vial ? t('Vial 키보드') : t('VIA 키보드'), dpi: null, rate: null, profileLabel: null, battery: null });
 
 let root;
 let timer = null;
 let pollEpoch = 0;
+let unlockEpoch = 0;
 let resizeObserver;
 const sourceText = () => (typeof state.source === 'function' ? state.source() : state.source || '');
 const hexId = (...ids) => ids.map((id) => id.toString(16).padStart(4, '0').toUpperCase()).join(':');
@@ -38,7 +41,7 @@ const edit = (fn) => { if (app.busy) return; try { fn(); refresh(); } catch (e) 
 // 사이트의 내장 파일이 바뀌면 그쪽을 쓰게 한다.
 async function loadDefinition(json, setMsg, source, remember = false) {
   const dev = state.dev;
-  const session = new ViaSession(dev, json);
+  const session = new ViaSession(dev, json, state.vial);
   await session.load(setMsg);
   if (state.dev !== dev) return;
   state.session = session;
@@ -73,6 +76,13 @@ export async function connect(devices, setMsg, json) {
   state.dev = new ViaDevice(devices);
   await state.dev.open();
   const { vendorId, productId } = state.dev;
+  // Vial 키보드는 정의 파일을 펌웨어에 넣어 두므로 그것을 쓴다
+  const vial = json ? null : await readVialDefinition(state.dev, await state.dev.protocolVersion());
+  if (vial) {
+    state.vial = vial.vial;
+    await loadDefinition(vial.json, setMsg, () => t('키보드에 들어 있는 정의 파일'));
+    return;
+  }
   let definition = json || rememberedDefinition(vendorId, productId);
   // 출처 문구는 언어를 바꿔도 따라가도록 그릴 때 번역한다
   let source = json ? () => t('직접 불러온 파일') : () => t('이 브라우저에 기억한 파일');
@@ -96,6 +106,8 @@ export async function disconnect() {
   state.dev = null;
   state.session = null;
   state.previous = null;
+  state.vial = null;
+  stopUnlock();
   state.error = '';
   state.capture = false;
   state.macro = null;
@@ -144,8 +156,10 @@ function layerPicker() {
     }, String(i))));
 }
 
+// test: 키 시험(true)이나 잠금 풀기('unlock') 화면이면 고르지 않고 보여 주기만 한다
 function keyboard(test = false) {
   const s = state.session;
+  const unlockKey = (k) => test === 'unlock' && (s.unlockKeys || []).some(([row, col]) => row === k.row && col === k.col);
   const dirty = s.changes();
   const keyButton = (k, cw) => {
     const encoder = k.encoder !== undefined;
@@ -162,7 +176,7 @@ function keyboard(test = false) {
     const [bx, by, bw, bh] = box ? [k.x + box.x, k.y + box.y, box.r - box.x, box.b - box.y] : [x, k.y, encoder ? k.w / 2 : k.w, k.h];
     const part = (px, py, pw, ph) => h('span', { class: 'via-key-part', style: `left:${u(px - box.x)};top:${u(py - box.y)};width:calc(${pw} * var(--via-unit) - 3px);height:calc(${ph} * var(--via-unit) - 3px);` });
     return h('button', {
-      type: 'button', class: `via-key ${k.color}${sh ? ' shaped' : ''}${code === 1 ? ' transparent' : ''}${changed ? ' changed' : ''}${selected && !test ? ' selected' : ''}`,
+      type: 'button', class: `via-key ${k.color}${sh ? ' shaped' : ''}${code === 1 ? ' transparent' : ''}${changed ? ' changed' : ''}${selected && !test ? ' selected' : ''}${!encoder && unlockKey(k) ? ' unlock-target' : ''}`,
       'data-row': k.row, 'data-col': k.col, 'data-encoder': encoder ? k.encoder : null,
       title: `${label.title}${encoder ? cw ? ' ↻' : ' ↺' : ''}`, disabled: !test && (!s.editable || app.busy),
       'aria-pressed': test ? 'false' : String(!!selected),
@@ -200,7 +214,8 @@ async function chooseCode(picked) {
   if (s.label(code).danger && !await ask(t('주의할 키 코드'), [s.label(code).title, t('이 키를 누르면 키보드가 재시작되거나 설정이 초기화될 수 있습니다.')], t('선택'))) return;
   if (state.session !== s || state.selected !== target) return;
   edit(() => {
-    if (target.custom) s.setCustom(target.custom, code);
+    if (target.vial) s.setVialEntry(target.vial.list, target.vial.index, vialPatch(s.vialEntry(target.vial.list, target.vial.index), target.vial.field, code));
+    else if (target.custom) s.setCustom(target.custom, code);
     else if (target.encoder !== undefined) s.setEncoder(state.layer, target.encoder, target.cw, code);
     else s.setKeycode(state.layer, target.row, target.col, code);
   });
@@ -270,7 +285,8 @@ function codePicker() {
   const error = h('p', { class: 'notice', role: 'alert', hidden: true });
   const direct = h('input', { type: 'text', id: 'via-direct', placeholder: 'LT(1, KC_SPC)', 'aria-label': t('직접 입력') });
   draw();
-  const current = state.selected.custom ? s.customValue(state.selected.custom)
+  const current = state.selected.vial ? vialCode(s.vialEntry(state.selected.vial.list, state.selected.vial.index), state.selected.vial.field)
+    : state.selected.custom ? s.customValue(state.selected.custom)
     : state.selected.encoder !== undefined ? s.encoder(state.layer, state.selected.encoder, state.selected.cw) : s.keycode(state.layer, state.selected.row, state.selected.col);
   return h('section', { class: 'via-picker', 'aria-label': t('키 고르기') },
     h('h3', null, t('키 고르기')),
@@ -292,7 +308,7 @@ function codePicker() {
 
 window.addEventListener('keydown', (e) => {
   if (!state.capture || !state.selected || !state.session?.editable || app.busy || isRecording() || !root?.isConnected || document.body.dataset.view !== 'config') return;
-  if (!['keymap', 'settings'].includes(state.tab) || e.target.closest('input, select, textarea, dialog')) return;
+  if (!['keymap', 'settings', 'vial'].includes(state.tab) || e.target.closest('input, select, textarea, dialog')) return;
   const code = CODE_TO_USAGE[e.code];
   if (code === undefined) return;
   e.preventDefault(); e.stopPropagation();
@@ -301,7 +317,7 @@ window.addEventListener('keydown', (e) => {
 
 // 키 시험 중에는 누른 키가 브라우저 단축키(F1 도움말, F5 새로고침, Ctrl+F 찾기, Alt 메뉴 등)로 실행되지 않게 막는다.
 // Ctrl+W·Ctrl+T·Alt+F4·Windows 키처럼 브라우저나 운영체제가 먼저 처리하는 조합은 웹 페이지에서 막을 수 없다.
-const keyTesting = () => state.tab === 'test' && !!state.session && !!root?.isConnected && document.body.dataset.view === 'config';
+const keyTesting = () => (state.tab === 'test' || state.unlocking) && !!state.session && !!root?.isConnected && document.body.dataset.view === 'config';
 for (const type of ['keydown', 'keyup']) {
   window.addEventListener(type, (e) => { if (keyTesting() && !e.target.closest?.('dialog')) e.preventDefault(); }, true);
 }
@@ -339,6 +355,111 @@ function settingsPanel() {
     g.label && h('h4', null, g.label), g.items.filter((item) => s.itemVisible(item)).map(setting))))),
     s.def.menus.unsupported.length > 0 && h('p', { class: 'notice' }, t('이 정의 파일의 일부 메뉴({menus})는 아직 표시하지 않습니다.', { menus: s.def.menus.unsupported.join(', ') })),
     state.selected?.custom && codePicker());
+}
+
+// ---------- Vial ----------
+
+// 잠금 풀기: 키보드가 정한 키들을 누르고 있는 동안 펌웨어가 숫자를 줄여 0이 되면 풀린다.
+function stopUnlock() { unlockEpoch++; state.unlocking = false; }
+
+async function startUnlock() {
+  const s = state.session;
+  if (!s || app.busy) return;
+  suspend();
+  if (!await busy(t('잠금 풀기 준비 중…'), async () => { await s.refreshUnlock(); if (s.locked()) await s.startUnlock(); })) return refresh();
+  if (!s.locked()) { toast(t('이미 잠금이 풀려 있습니다.'), 'ok'); return refresh(); }
+  state.unlocking = true;
+  const epoch = ++unlockEpoch;
+  refresh();
+  const tick = async () => {
+    if (epoch !== unlockEpoch || state.session !== s || document.body.dataset.view !== 'config') return;
+    if (!app.busy && !app.background) {
+      const job = s.pollUnlock();
+      app.background = job;
+      try {
+        const r = await job;
+        if (epoch !== unlockEpoch) return;
+        if (r.unlocked) { stopUnlock(); toast(t('잠금을 풀었습니다. 매크로 저장과 키 시험을 할 수 있습니다.'), 'ok'); refresh(); return; }
+        const msg = root?.querySelector('#via-unlock-msg');
+        if (msg) msg.textContent = t('계속 누르고 있으세요 (남은 횟수 {n})', { n: r.counter });
+      } catch (e) {
+        stopUnlock(); toast(e.message, 'error'); refresh(); return;
+      } finally { if (app.background === job) app.background = null; }
+    }
+    setTimeout(tick, 150);
+  };
+  setTimeout(tick, 150);
+}
+
+function unlockPanel() {
+  const n = state.session.unlockKeys?.length || 0;
+  return h('section', { class: 'via-unlock', 'aria-label': t('Vial 잠금 풀기') },
+    h('h3', null, t('Vial 잠금 풀기')),
+    h('p', null, n ? t('키보드에서 노란색으로 표시한 키 {n}개를 함께 누른 채로 기다리세요.', { n }) : t('이 키보드는 잠금 풀기 키를 알려 주지 않았습니다.')),
+    h('p', { class: 'hint', id: 'via-unlock-msg', role: 'status' }, t('키를 누르면 진행됩니다.')),
+    keyboard('unlock'),
+    h('div', { class: 'row-actions' }, h('button', { class: 'ghost', id: 'via-unlock-cancel', onclick: () => { stopUnlock(); refresh(); } }, t('그만두기'))));
+}
+
+// Vial 항목의 키 칸: 콤보의 키 1~4는 'k0'~'k3'
+const vialCode = (entry, field) => (/^k\d$/.test(field) ? entry.keys[+field[1]] : entry[field]);
+const vialPatch = (entry, field, code) => (/^k\d$/.test(field) ? { keys: entry.keys.map((c, i) => (i === +field[1] ? code : c)) } : { [field]: code });
+const MOD_NAMES = ['LCtrl', 'LShift', 'LAlt', 'LGUI', 'RCtrl', 'RShift', 'RAlt', 'RGUI'];
+
+function vialKey(list, index, field, label) {
+  const s = state.session;
+  const code = vialCode(s.vialEntry(list, index), field);
+  const sel = state.selected?.vial;
+  const selected = sel && sel.list === list && sel.index === index && sel.field === field;
+  return h('button', {
+    type: 'button', class: `via-vial-key${selected ? ' selected' : ''}`, 'data-vial': `${list}:${index}:${field}`, 'aria-pressed': String(!!selected),
+    disabled: !s.editable || app.busy, title: `${label}: ${s.label(code).title}`,
+    onclick: () => { state.selected = { vial: { list, index, field } }; state.combo = { ...state.combo, kind: 'none' }; refresh(); },
+  }, h('small', null, label), h('span', null, s.label(code).label));
+}
+
+function vialPanel() {
+  const s = state.session;
+  const set = (list, i, patch) => edit(() => s.setVialEntry(list, i, patch));
+  const number = (label, value, max, change) => h('label', { class: 'via-vial-number' }, h('small', null, label),
+    h('input', { type: 'number', min: 0, max, value, disabled: app.busy, onchange: (e) => change(Math.max(0, Math.min(max, Math.round(+e.target.value || 0)))) }));
+  const section = (title, hint, rows) => rows.length > 0 && h('section', null, h('h3', null, title), h('p', { class: 'hint' }, hint), h('div', { class: 'via-vial-list' }, rows));
+  const td = s.work.vial.tapDance.map((e, i) => h('div', { class: 'via-vial-row', 'data-td': i }, h('b', null, `TD(${i})`),
+    vialKey('tapDance', i, 'onTap', t('탭')), vialKey('tapDance', i, 'onHold', t('길게')), vialKey('tapDance', i, 'onDoubleTap', t('두 번 탭')), vialKey('tapDance', i, 'onTapHold', t('탭 후 길게')),
+    number(t('판정 시간 (ms)'), e.term, 10000, (term) => set('tapDance', i, { term }))));
+  const combos = s.work.vial.combos.map((e, i) => h('div', { class: 'via-vial-row', 'data-combo': i }, h('b', null, `#${i}`),
+    [0, 1, 2, 3].map((k) => vialKey('combos', i, `k${k}`, t('키 {n}', { n: k + 1 }))), h('span', { class: 'via-vial-arrow' }, '→'), vialKey('combos', i, 'output', t('결과'))));
+  const overrides = s.work.vial.keyOverrides.map((e, i) => h('div', { class: 'via-vial-row', 'data-override': i }, h('b', null, `#${i}`),
+    h('label', null, h('input', { type: 'checkbox', checked: !!(e.options & 0x80), disabled: app.busy, onchange: (ev) => set('keyOverrides', i, { options: ev.target.checked ? e.options | 0x80 : e.options & 0x7f }) }), ' ' + t('켜기')),
+    h('div', { class: 'via-vial-mods', role: 'group', 'aria-label': t('함께 누르는 수정자') }, MOD_NAMES.map((name, bit) => h('label', null,
+      h('input', { type: 'checkbox', checked: !!(e.triggerMods & (1 << bit)), disabled: app.busy, onchange: (ev) => set('keyOverrides', i, { triggerMods: ev.target.checked ? e.triggerMods | (1 << bit) : e.triggerMods & ~(1 << bit) }) }), ' ' + name))),
+    vialKey('keyOverrides', i, 'trigger', t('누른 키')), h('span', { class: 'via-vial-arrow' }, '→'), vialKey('keyOverrides', i, 'replacement', t('바꿀 키'))));
+  return h('div', null,
+    section(t('탭 댄스'), t('키 하나를 탭·길게·두 번 탭에 따라 다르게 씁니다. 키맵에서 「탭 댄스」 묶음의 TD(n)으로 지정하세요.'), td),
+    section(t('콤보'), t('여러 키를 함께 누르면 결과 키를 보냅니다. 쓰지 않는 칸은 KC_NO로 두세요.'), combos),
+    section(t('키 오버라이드'), t('수정자와 함께 누른 키를 다른 키로 바꿉니다 (예: Shift+Backspace → Delete). 레이어와 세부 옵션은 그대로 둡니다.'), overrides),
+    !td.length && !combos.length && !overrides.length && h('p', { class: 'hint' }, t('이 키보드는 탭 댄스·콤보·키 오버라이드를 지원하지 않습니다.')),
+    state.selected?.vial && codePicker());
+}
+
+function qmkPanel() {
+  const s = state.session;
+  const values = s.work.vial.settings;
+  return h('div', null, QMK_SETTINGS.map((g) => {
+    const fields = g.fields.filter((f) => f.qsid in values);
+    if (!fields.length) return null;
+    return h('section', { class: 'via-settings-group' }, h('h3', null, t(g.label)), fields.map((f) => {
+      const v = s.qmkSetting(f.qsid);
+      const attrs = { 'data-qsid': f.qsid, ...(f.bit !== undefined ? { 'data-bit': f.bit } : {}), disabled: app.busy };
+      if (f.min === undefined) {
+        const on = f.bit !== undefined ? !!(v & (1 << f.bit)) : !!v;
+        return field(t(f.label), null, h('input', { type: 'checkbox', checked: on, ...attrs,
+          onchange: (e) => edit(() => s.setQmkSetting(f.qsid, f.bit !== undefined ? (e.target.checked ? (v | (1 << f.bit)) >>> 0 : (v & ~(1 << f.bit)) >>> 0) : +e.target.checked)) }));
+      }
+      return field(t(f.label), null, h('input', { type: 'number', min: f.min, max: f.max, value: v, ...attrs,
+        onchange: (e) => edit(() => s.setQmkSetting(f.qsid, Math.max(f.min, Math.min(f.max, Math.round(+e.target.value || 0))))) }));
+    }));
+  }));
 }
 
 // 매크로 텍스트 모드: VIA 앱과 같은 식(Hello{KC_ENT}{100}{KC_LCTL,KC_C})으로 한 칸을 통째로 쓴다.
@@ -388,6 +509,7 @@ function macrosPanel() {
 
 function startTest() {
   const s = state.session;
+  if (s.locked()) return;
   const epoch = pollEpoch;
   const tick = async () => {
     if (epoch !== pollEpoch || state.session !== s || state.tab !== 'test' || document.body.dataset.view !== 'config' || document.hidden) return;
@@ -420,15 +542,23 @@ export function render(el) {
   const s = state.session;
   root.classList.add('via-editor');
   if (!s) { root.replaceChildren(h('h2', null, summary().name), definitionLoader()); return; }
-  const names = [['keymap', t('키맵')], ['layout', t('레이아웃')], ['settings', t('조명 / 설정')], ['macros', t('매크로')], ['test', t('키 시험')]];
-  const body = state.tab === 'keymap' ? [layerPicker(), keyboard(), codePicker()]
+  const vialTabs = s.vial && s.work.vial ? [
+    ...(s.vialCounts.tapDance + s.vialCounts.combo + s.vialCounts.keyOverride > 0 ? [['vial', t('탭 댄스·콤보')]] : []),
+    ...(Object.keys(s.work.vial.settings).length ? [['qmk', t('QMK 설정')]] : []),
+  ] : [];
+  const names = [['keymap', t('키맵')], ['layout', t('레이아웃')], ['settings', t('조명 / 설정')], ['macros', t('매크로')], ...vialTabs, ['test', t('키 시험')]];
+  const lockedTest = state.tab === 'test' && s.locked();
+  const body = state.unlocking ? unlockPanel()
+    : state.tab === 'keymap' ? [layerPicker(), keyboard(), codePicker()]
     : state.tab === 'layout' ? layoutPanel() : state.tab === 'settings' ? settingsPanel() : state.tab === 'macros' ? macrosPanel()
+      : state.tab === 'vial' ? vialPanel() : state.tab === 'qmk' ? qmkPanel()
+      : lockedTest ? h('p', { class: 'notice' }, t('Vial 키보드는 잠금을 푼 뒤에 키 시험을 할 수 있습니다.'))
       : [h('p', { class: 'hint', id: 'via-test-msg' }, t('키보드의 키를 눌러 확인하세요.')),
         h('p', { class: 'hint' }, t('시험하는 동안 F1·F5 같은 브라우저 단축키는 막습니다. Ctrl+W, Alt+F4, Windows 키처럼 브라우저나 운영체제가 먼저 처리하는 키는 막을 수 없습니다.')),
         keyboard(true)];
   root.replaceChildren(...[
-    h('div', { class: 'via-heading' }, h('div', null, h('h2', null, s.def.name), h('p', { class: 'hint' }, `${hexId(s.def.vendorId, s.def.productId)} · VIA ${s.protocol}${sourceText() ? ` · ${sourceText()}` : ''}`)),
-      h('button', { class: 'ghost', disabled: app.busy, onclick: async () => {
+    h('div', { class: 'via-heading' }, h('div', null, h('h2', null, s.def.name), h('p', { class: 'hint' }, `${hexId(s.def.vendorId, s.def.productId)} · ${s.vial ? `Vial ${s.vial.protocol}` : `VIA ${s.protocol}`}${sourceText() ? ` · ${sourceText()}` : ''}`)),
+      !s.vial && h('button', { class: 'ghost', disabled: app.busy, onclick: async () => {
         // 저장하지 않은 편집은 「취소하고 돌아가기」로 돌아오면 그대로 남는다. 새 정의 파일을 불러올 때만 버려진다.
         suspend(); state.previous = { session: s, source: state.source }; state.session = null; state.error = ''; shell.refresh();
       } }, t('정의 파일 바꾸기')),
@@ -436,16 +566,22 @@ export function render(el) {
       h('button', { class: 'ghost', id: 'via-layout-open', disabled: app.busy, onclick: () => root.querySelector('#via-layout-import').click() }, t('VIA 파일 불러오기')),
       h('input', { type: 'file', id: 'via-layout-import', accept: '.json,application/json', hidden: true,
         onchange: async (e) => { const file = e.target.files[0]; e.target.value = ''; if (file) await importLayoutFile(file); } })),
-    !s.editable && h('p', { class: 'notice' }, t('이 키보드의 VIA 프로토콜({n})은 아직 편집하지 않습니다. 읽기만 합니다.', { n: s.protocol })),
+    !s.editable && h('p', { class: 'notice' }, s.vial ? t('이 Vial 키보드(프로토콜 {n})는 예전 키 코드 체계를 써서 키맵은 읽기만 합니다.', { n: s.vial.protocol })
+      : t('이 키보드의 VIA 프로토콜({n})은 아직 편집하지 않습니다. 읽기만 합니다.', { n: s.protocol })),
+    s.locked() && !state.unlocking && h('div', { class: 'notice via-lock' },
+      h('span', null, t('Vial 키보드가 잠겨 있습니다. 매크로 저장, QK_BOOT 지정, 키 시험에는 잠금 풀기가 필요합니다.')),
+      h('button', { id: 'via-unlock', disabled: app.busy, onclick: startUnlock }, t('잠금 풀기'))),
     h('div', { class: 'stats via-stats' }, tile(t('레이어'), s.layers), tile(t('행렬'), `${s.def.rows} × ${s.def.cols}`), tile(t('매크로'), s.macroCount)),
-    tabs(names, state.tab, (tab) => { suspend(); state.tab = tab; state.selected = null; refresh(); }, t('키보드 설정')),
+    tabs(names, state.tab, (tab) => { suspend(); stopUnlock(); state.tab = tab; state.selected = null; refresh(); }, t('키보드 설정')),
     tabPanel(state.tab, body)].filter(Boolean));
   const fit = () => {
-    root.style.setProperty('--via-unit', `${Math.max(12, Math.min(64, (root.clientWidth - 36) / s.def.width))}px`);
+    // 키보드가 들어가는 칸의 너비에 맞춘다 (칸이 없으면 편집 화면 너비에서 여백을 뺀다)
+    const room = root.querySelector('.via-keyboard-scroll')?.clientWidth || root.clientWidth - 36;
+    root.style.setProperty('--via-unit', `${Math.max(12, Math.min(64, (room - 4) / s.def.width))}px`);
     root.style.setProperty('--pick-unit', `${Math.max(14, Math.min(46, (root.clientWidth - 48) / 18.5))}px`);
   };
   fit(); resizeObserver = new ResizeObserver(fit); resizeObserver.observe(root);
-  if (state.tab === 'test' && document.body.dataset.view === 'config') startTest();
+  if (state.tab === 'test' && !state.unlocking && document.body.dataset.view === 'config') startTest();
 }
 
 // VIA 레이아웃 파일을 편집본으로 불러온다 (저장해야 기록된다)
@@ -467,6 +603,10 @@ export async function save() {
   const s = state.session;
   const changes = s?.changes() || [];
   if (!changes.length || app.busy) return;
+  if (s.needsUnlock(changes)) {
+    toast(t('매크로나 QK_BOOT 키를 저장하려면 먼저 Vial 잠금을 풀어야 합니다.'), 'error');
+    return startUnlock();
+  }
   const keys = changes.filter((c) => ['key', 'encoder'].includes(c.kind)).length;
   const macros = changes.filter((c) => c.kind === 'macro').length;
   const settings = changes.length - keys - macros;
@@ -488,7 +628,7 @@ export async function importBackup(file) {
 export function exportDiagnostics() {
   const s = state.session;
   if (!s) return;
-  download({ protocol: s.protocol, layers: s.layers, matrix: { rows: s.def.rows, cols: s.def.cols }, firmware: s.firmware,
+  download({ protocol: s.protocol, vial: s.vial, layers: s.layers, matrix: { rows: s.def.rows, cols: s.def.cols }, firmware: s.firmware,
     id: hexId(s.def.vendorId, s.def.productId), definition: { name: s.def.name, source: sourceText() },
     keymap: s.orig.keymap.map((c) => c.toString(16).padStart(4, '0')), unsupported: s.def.menus.unsupported }, 'via-diagnostics', s.def.name);
 }

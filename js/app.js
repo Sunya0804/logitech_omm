@@ -80,7 +80,16 @@ async function pollBattery() {
 // MCHOSE는 실기기(K7 Ultra)에서 읽어 둔 응답을 재생한다.
 async function connectDemo(kind) {
   try {
-    if (kind === 'via') {
+    if (kind === 'vial') {
+      const { MockViaDevice } = await import('./mock-via.js');
+      const { packed } = await import('./vial-demo.js');
+      const dev = new MockViaDevice({ vendorId: 0xfeed, productId: 0x0060, productName: 'GOMM Vial 60', rows: 5, cols: 15, macroCount: 8, macroBufferSize: 512,
+        vial: { packed, tapDance: Array.from({ length: 4 }, (_, i) => ({ onTap: i ? 0 : 0x29, onHold: i ? 0 : 0xe1, onDoubleTap: 0, onTapHold: 0, term: 200 })),
+          combos: [{ keys: [0x09, 0x0a, 0, 0], output: 0x29 }, { keys: [0, 0, 0, 0], output: 0 }],
+          keyOverrides: [{ trigger: 0x2a, replacement: 0x4c, layers: 0xffff, triggerMods: 0x22, negativeMods: 0, suppressedMods: 0x22, options: 0x87 }],
+          settings: { 7: [2, 200], 2: [2, 50], 21: [4, 0], 3: [1, 0], 4: [2, 175] } } });
+      await connectWith(viaUi, [dev], t('키보드 정보 읽는 중…'));
+    } else if (kind === 'via') {
       const { MockViaDevice } = await import('./mock-via.js');
       const { demoDefinition } = await import('./via-demo.js');
       const json = demoDefinition();

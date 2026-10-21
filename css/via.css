@@ -57,6 +57,20 @@
 .via-editor .macro-steps input[type=text] { width: 100%; min-width: 0; }
 .via-editor .row-actions { flex-wrap: wrap; }
 .via-editor .tabs { flex-wrap: wrap; }
+/* Vial: 잠금 안내, 잠금 풀기 키, 탭 댄스·콤보·키 오버라이드 줄 */
+.via-lock { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.via-key.unlock-target { --key-bg: var(--warn); color: var(--accent-text); }
+.via-unlock .via-keyboard-scroll { margin: 12px 0; }
+.via-vial-list { display: grid; gap: 8px; }
+.via-vial-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.via-vial-row > b { min-width: 52px; }
+.via-vial-key { display: inline-flex; flex-direction: column; align-items: flex-start; min-width: 96px; padding: 4px 10px; text-align: left; }
+.via-vial-key small, .via-vial-number small { color: var(--muted); font-size: 11px; }
+.via-vial-key.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+.via-vial-number { display: inline-flex; flex-direction: column; }
+.via-vial-number input { width: 96px; }
+.via-vial-arrow { color: var(--muted); }
+.via-vial-mods { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; }
 @media (max-width: 600px) {
   #workspace:has(.via-editor) { padding: 16px; }
   #editor.via-editor { padding: 12px; }
