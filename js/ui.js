@@ -40,7 +40,8 @@ export function ask(title, lines, okLabel) {
     const finish = (ok) => {
       form.removeEventListener('submit', onSubmit);
       dlg.removeEventListener('cancel', onCancel);
-      resolve(ok);
+      // submit은 대화상자가 닫히기 전에 온다. 바로 다음 ask가 연 대화상자를 이 닫기가 닫지 않도록 한 박자 늦춘다.
+      setTimeout(() => resolve(ok));
     };
     const onSubmit = (e) => finish(!!e.submitter && e.submitter.value === 'ok');
     const onCancel = () => finish(false);

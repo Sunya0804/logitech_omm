@@ -674,4 +674,9 @@ export default {
   "이 키보드의 정의 파일을 자동으로 찾지 못했습니다. 파일을 직접 불러오세요.": "Could not find a definition file for this keyboard automatically. Load the file yourself.",
   "취소하고 돌아가기": "Cancel and go back",
   "자동으로 찾기": "Find automatically",
+  "기기가 지금 쓰고 있는 프로필을 확인하지 못했습니다.": "Could not check which profile the device is using.",
+  "편집하는 동안 기기의 프로필이 {from}에서 {to}(으)로 바뀌었습니다.": "The device switched from profile {from} to profile {to} while you were editing.",
+  "프로필 {n}(으)로 되돌린 뒤 그 프로필에 저장합니다.": "GOMM will switch back to profile {n} and save there.",
+  "되돌리고 저장": "Switch back and save",
+  "기기가 프로필 {n}(으)로 돌아오지 않아 저장하지 않았습니다. 편집 내용은 그대로 남아 있습니다.": "The device did not switch back to profile {n}, so nothing was saved. Your edits are still here.",
 };

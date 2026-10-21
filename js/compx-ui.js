@@ -259,7 +259,27 @@ export async function save() {
     t('쓰는 동안 기기를 분리하거나 전원을 끄지 마세요.'),
   ].filter(Boolean), t('저장'));
   if (!ok) return;
+  // 설정 이미지와 매크로 칸은 프로필마다 따로 있고, 쓰기는 기기가 지금 쓰는 프로필로 간다.
+  // 읽은 뒤에 마우스 버튼 등으로 프로필이 바뀌었으면 다른 프로필을 덮어쓰게 되므로 먼저 확인한다.
+  const target = cx.extras.profile;
+  let restore = false;
+  if (target !== null) {
+    let live = null;
+    if (!await busy(t('저장 중…'), () => cx.dev.withControl(async () => { live = await cx.dev.readProfile(); }))) return shell.refresh();
+    if (live !== target) {
+      restore = await ask(t('기기에 저장'), [
+        live === null ? t('기기가 지금 쓰고 있는 프로필을 확인하지 못했습니다.')
+          : t('편집하는 동안 기기의 프로필이 {from}에서 {to}(으)로 바뀌었습니다.', { from: target + 1, to: live + 1 }),
+        t('프로필 {n}(으)로 되돌린 뒤 그 프로필에 저장합니다.', { n: target + 1 }),
+      ], t('되돌리고 저장'));
+      if (!restore) return;
+    }
+  }
   const done = await busy(t('저장 중…'), () => cx.dev.withControl(async () => {
+    if (restore) await cx.dev.setProfile(target);
+    if (target !== null && await cx.dev.readProfile() !== target) {
+      throw new Error(t('기기가 프로필 {n}(으)로 돌아오지 않아 저장하지 않았습니다. 편집 내용은 그대로 남아 있습니다.', { n: target + 1 }));
+    }
     // 매크로를 먼저 기록해서, 버튼이 기록되지 않은 칸을 가리키는 순간이 없게 한다.
     for (const [slot, steps] of macros) {
       cx.macros[slot] = await X.writeSlot(cx.dev, slot, steps);
