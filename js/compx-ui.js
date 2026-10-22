@@ -4,7 +4,7 @@ import * as C from './compx.js';
 import * as X from './compx-macro.js';
 import { stopRecording, macroSummary, macroEditor } from './macro-editor.js';
 import { t, num } from './i18n.js';
-import { h, choice, toast, busy, ask, download, tabs, tabPanel, tile, field, app, shell } from './ui.js';
+import { h, choice, stepper, toast, busy, ask, download, tabs, tabPanel, tile, field, app, shell } from './ui.js';
 
 const DIAG_LENGTH = 256;
 
@@ -440,7 +440,10 @@ function renderPerformance(m) {
   return h('div', null,
     field(t('보고율'), 'Hz', choice(t('보고율'), withCurrent(rates, cx.work[C.FLASH.reportRate]), cx.work[C.FLASH.reportRate], false, scalar(C.FLASH.reportRate))),
     cx.model.lod
-      ? field(t('리프트오프 거리'), null, choice(t('리프트오프 거리'), withCurrent(translated(cx.model.lod), m.lod), m.lod, false, scalar(C.FLASH.lod)))
+      ? (cx.model.lod.every(([, text]) => / mm$/.test(text))
+        // 「0.7 mm」처럼 거리로 적힌 기종은 숫자 칸과 ▲▼로, 낮음·중간·높음처럼 단계로 적힌 기종은 버튼으로 고른다.
+        ? field(t('리프트오프 거리'), 'mm', stepper(t('리프트오프 거리'), cx.model.lod.map(([v, text]) => [v, parseFloat(text)]), m.lod, false, scalar(C.FLASH.lod)))
+        : field(t('리프트오프 거리'), null, choice(t('리프트오프 거리'), withCurrent(translated(cx.model.lod), m.lod), m.lod, false, scalar(C.FLASH.lod))))
       : field(t('리프트오프 거리'), null, choice(t('리프트오프 거리'), [[m.lod, t('저장 값 {value}', { value: m.lod })]], m.lod, true, () => {})),
     h('p', { class: 'hint field-desc' }, cx.model.lod
       ? t('마우스를 들어 올렸을 때 추적이 멈추는 높이입니다.')

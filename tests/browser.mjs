@@ -383,6 +383,38 @@ try {
   await page.waitForFunction(() => /맞지 않는 백업/.test(document.querySelector('#toasts').textContent));
   assert.equal(await page.evaluate(() => OMM.compxUi.isDirty()), false);
 
+  // 리프트오프 거리(ATK Ultra 계열, 0.7~1.7 mm): 0.1 mm 단위로 직접 입력하고 ▲▼로 한 칸씩 옮긴다. 목록에 없는 값은 받지 않는다.
+  // VGN처럼 낮음·중간·높음 단계로 된 기종은 버튼으로 고른다.
+  assert.equal(await page.locator('[data-stepper="리프트오프 거리"]').count(), 0);
+  await page.evaluate(async () => {
+    const { MockCompxDevice } = await import('/js/mock-compx.js');
+    const dev = new MockCompxDevice({ vendorId: OMM.compx.VENDOR_ATK, productName: 'ATK F1 LEVIATAN 2.0', cid: 1, mid: 13 });
+    const model = OMM.compx.modelFor(dev.vendorId, 1, 13);
+    for (const bank of dev.banks) [400, 800, 1600, 3200].forEach((dpi, i) => OMM.compx.setDpi(bank, i, dpi, model));
+    await OMM.connectCompx([dev]);
+  });
+  await page.getByRole('tab', { name: '성능', exact: true }).click();
+  const lodValue = () => page.evaluate(() => OMM.compx.parse(OMM.compxUi.state.work).lod);
+  const lodInput = page.locator('[data-stepper="리프트오프 거리"] input');
+  await lodInput.fill('1.3');
+  await lodInput.press('Enter');
+  assert.equal(await lodValue(), 7);
+  assert.equal(await lodInput.inputValue(), '1.3');
+  await page.getByRole('button', { name: '리프트오프 거리 올리기' }).click();
+  assert.equal(await lodValue(), 8);
+  assert.equal(await lodInput.inputValue(), '1.4');
+  await lodInput.press('ArrowDown');
+  assert.equal(await lodValue(), 7);
+  await lodInput.fill('1.35');
+  await lodInput.press('Enter');
+  assert.match(await page.evaluate(() => toastLog.at(-1)), /0\.7~1\.7, 0\.1 단위/);
+  assert.equal(await lodValue(), 7);
+  await lodInput.fill('1.7');
+  await lodInput.press('Enter');
+  assert.equal(await page.getByRole('button', { name: '리프트오프 거리 올리기' }).isDisabled(), true);
+  await page.locator('#btn-revert').click();
+  assert.equal(await page.evaluate(() => OMM.compxUi.isDirty()), false);
+
   // MCHOSE 백업: 편집 허용 전에는 불러오기가 막히고, 맞지 않는 값은 빼고 불러온다
   await page.locator('#btn-disconnect').click();
   await page.locator('#views [data-view=home]').click();

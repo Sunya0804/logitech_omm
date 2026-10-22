@@ -254,6 +254,15 @@ ul.hint li { margin: 4px 0; }
 .choice button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
 .choice button.active, .choice button.active:hover:not(:disabled) { background: var(--accent); color: var(--accent-text); font-weight: 700; }
 .choice.small button { min-width: 0; padding: 4px 9px; font-size: 13px; }
+/* 숫자 칸과 오른쪽 ▲▼ (리프트오프 거리) */
+.stepper { display: inline-flex; flex: none; align-self: flex-start; width: max-content; align-items: stretch; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.stepper:focus-within { border-color: var(--accent); }
+.stepper input[type="text"], .field .stepper input[type="text"] { width: 76px; min-width: 0; padding: 7px 10px; border: 0; border-radius: 0; background: none; text-align: right; font-variant-numeric: tabular-nums; outline: none; }
+.stepper-buttons { display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+.stepper-buttons button { flex: 1; min-width: 0; min-height: 0; padding: 0 10px; border: 0; border-radius: 0; background: none; color: var(--muted); font-size: 9px; line-height: 1; }
+.stepper-buttons button + button { border-top: 1px solid var(--border); }
+.stepper-buttons button:hover:not(:disabled), .stepper-buttons button:focus-visible { background: var(--surface-3); color: var(--text); }
+.stepper-buttons button:disabled { opacity: .35; }
 .field > label small, .lod small { margin-left: 6px; color: var(--faint); font-size: 11px; }
 .lod { display: inline-flex; align-items: center; gap: 6px; }
 .lod small { margin: 0; }

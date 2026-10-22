@@ -88,6 +88,52 @@ export function choice(label, options, current, ro, onPick, extraClass = '') {
   }, text)));
 }
 
+// 정해진 값 사이를 오가는 숫자 칸. 직접 입력하거나, 오른쪽 ▲▼ 또는 키보드 위·아래 화살표로 한 칸씩 옮긴다.
+// options: [[저장 값, 숫자]]. 목록에 없는 숫자를 넣으면 쓸 수 있는 값을 알려 주고 되돌린다.
+export function stepper(label, options, current, ro, onPick) {
+  const list = [...options].sort((a, b) => a[1] - b[1]);
+  const nums = list.map(([, n]) => n);
+  const digits = Math.max(1, ...nums.map((n) => (String(n).split('.')[1] || '').length));
+  const show = (n) => n.toFixed(digits);
+  const at = list.findIndex(([v]) => v === current);
+  const steps = nums.slice(1).map((n, i) => +(n - nums[i]).toFixed(digits));
+  const rule = steps.every((s) => s === steps[0])
+    ? t('{min}~{max}, {step} 단위로 입력하세요.', { min: show(nums[0]), max: show(nums.at(-1)), step: steps[0] ?? 0 })
+    : t('{values} 중 하나를 입력하세요.', { values: nums.map(show).join(', ') });
+  // 값을 바꾸면 화면을 다시 그리므로, 누른 칸에 포커스를 돌려 놓아 이어서 누를 수 있게 한다.
+  const pick = (i, part) => {
+    const next = list[Math.max(0, Math.min(list.length - 1, i))];
+    if (next[0] === current) return;
+    onPick(next[0]);
+    document.querySelector(`[data-stepper="${CSS.escape(label)}"] [data-part="${part}"]`)?.focus();
+  };
+  const up = () => pick(at < 0 ? 0 : at + 1, 'up');
+  const down = () => pick(at < 0 ? 0 : at - 1, 'down');
+  return h('div', { class: 'stepper', 'data-stepper': label },
+    h('input', {
+      type: 'text', inputmode: 'decimal', 'data-part': 'input', 'aria-label': label, title: rule, disabled: ro,
+      value: at < 0 ? '' : show(nums[at]), placeholder: at < 0 ? t('기타 ({value})', { value: current }) : '',
+      onkeydown: (e) => {
+        const move = { ArrowUp: at < 0 ? 0 : at + 1, ArrowDown: at < 0 ? 0 : at - 1 }[e.key];
+        if (move === undefined) return;
+        e.preventDefault();
+        pick(move, 'input');
+      },
+      onchange: (e) => {
+        const n = Number(e.target.value.trim().replace(',', '.'));
+        const i = e.target.value.trim() ? nums.findIndex((m) => Math.abs(m - n) < 1e-9) : -1;
+        if (i < 0) {
+          e.target.value = at < 0 ? '' : show(nums[at]);
+          return toast(rule, 'error');
+        }
+        pick(i, 'input');
+      },
+    }),
+    h('div', { class: 'stepper-buttons' },
+      h('button', { type: 'button', 'data-part': 'up', 'aria-label': t('{label} 올리기', { label }), disabled: ro || at === list.length - 1, onclick: up }, '▲'),
+      h('button', { type: 'button', 'data-part': 'down', 'aria-label': t('{label} 내리기', { label }), disabled: ro || at === 0, onclick: down }, '▼')));
+}
+
 // 설정 화면의 탭 줄. 화살표·Home·End 키로 탭 사이를 옮길 수 있다. items: [[id, 표시]].
 export function tabs(items, current, onPick, label) {
   const buttons = items.map(([id, text]) => h('button', {

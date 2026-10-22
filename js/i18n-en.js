@@ -795,4 +795,7 @@ export default {
   "설정을 편집하려면 먼저 마우스나 키보드를 연결하세요.": "Connect a mouse or keyboard first to edit its settings.",
   "+ 마우스": "+ Mouse",
   "+ 키보드": "+ Keyboard",
+  "{values} 중 하나를 입력하세요.": "Enter one of {values}.",
+  "{label} 올리기": "Increase {label}",
+  "{label} 내리기": "Decrease {label}",
 };

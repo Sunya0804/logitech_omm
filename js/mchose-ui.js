@@ -1,7 +1,7 @@
 // MCHOSE(mchose.js) 기기의 설정 화면. 연결할 때는 읽기만 하고, 사용자가 M HUB와 값을 대조한 뒤 편집을 연다.
 import { filters, catalog, createClient, changes, saveChanges, knownStatus, editableSnapshot } from './mchose.js';
 import { t, num } from './i18n.js';
-import { h, toast, busy, ask, download, tabs, tabPanel, tile, field, app, shell } from './ui.js';
+import { h, stepper, toast, busy, ask, download, tabs, tabPanel, tile, field, app, shell } from './ui.js';
 
 export { filters, catalog };
 export const state = { client: null, original: null, work: null, unlocked: false, stale: false, tab: 'overview' };
@@ -168,6 +168,14 @@ function select(key, label, options) {
     state.work[key] = values[Number(e.target.value)][0]; changed();
   } }, ...values.map(([v, text], i) => h('option', { value: i, selected: v === current }, text))));
 }
+// 리프트오프 거리가 「0.7 mm」처럼 숫자로 오면 입력 칸과 ▲▼로, Low·High 같은 이름이면 목록으로 고른다.
+function liftOff(s) {
+  const options = s.supportedLiftOffDistances;
+  const mm = options?.map((v) => /^(\d+(?:\.\d+)?) mm$/.exec(v));
+  if (s.liftOffDistance == null || !mm?.length || !mm.every(Boolean)) return select('liftOffDistance', t('리프트오프 거리'), options);
+  return field(t('리프트오프 거리'), 'mm', stepper(t('리프트오프 거리'), options.map((v, i) => [v, Number(mm[i][1])]), s.liftOffDistance, !canEdit(),
+    (v) => { state.work.liftOffDistance = v; changed(); shell.refresh(); }));
+}
 function numberInput(value, min, max, step, setter, attrs = {}) {
   return h('input', { type: 'number', value, min, max, step, disabled: !canEdit(), ...attrs, onchange: (e) => {
     const n = Number(e.target.value);
@@ -196,7 +204,7 @@ function overview(s) {
 }
 function performance(s) {
   const nodes = [select('pollingRateHz', t('보고율'), s.supportedPollingRates?.map((v) => [v, `${num(v)} Hz`])),
-    select('liftOffDistance', t('리프트오프 거리'), s.supportedLiftOffDistances), select('powerMode', t('성능 모드'), s.powerModes)];
+    liftOff(s), select('powerMode', t('성능 모드'), s.powerModes)];
   const dpi = s.ui?.dpiStageEditor;
   if (dpi && s.dpiStages?.length) {
     nodes.push(h('h3', null, t('DPI 단계 ({min}~{max})', { min: num(dpi.minDpi), max: num(dpi.maxDpi) })));
