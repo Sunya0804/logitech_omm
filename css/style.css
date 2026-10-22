@@ -190,7 +190,7 @@ ul.hint li { margin: 4px 0; }
 
 /* ---------- 시작 화면 ---------- */
 
-#welcome { max-width: 920px; margin: 0 auto; padding: 48px 28px; }
+#welcome { max-width: 1280px; margin: 0 auto; padding: 48px 28px; }
 .hero {
   position: relative;
   overflow: hidden;
@@ -204,7 +204,7 @@ ul.hint li { margin: 4px 0; }
 }
 .hero-badge { display: inline-block; margin-bottom: 14px; padding: 3px 10px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--muted); font-size: 12px; }
 .hero h2 { font-size: 34px; letter-spacing: -.03em; margin-bottom: 10px; }
-.hero p { max-width: 520px; color: var(--muted); font-size: 15px; }
+.hero p { max-width: 680px; color: var(--muted); font-size: 15px; }
 .welcome-actions { display: flex; gap: 10px; margin-top: 24px; }
 .welcome-actions button { padding: 11px 24px; font-size: 15px; }
 .demo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; color: var(--muted); font-size: 13px; }
@@ -220,7 +220,8 @@ ul.hint li { margin: 4px 0; }
 .kind-icon { width: 30px; height: 30px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 #demo-banner { width: min(984px, calc(100% - 56px)); margin: 16px auto 0; }
 .chip.demo { border-color: rgba(255, 180, 84, .45); color: var(--warn); }
-.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin: 16px 0 24px; }
+/* 기능 소개 4칸: 넓으면 한 줄, 좁으면 2×2, 휴대폰은 한 줄에 하나 */
+.feature-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 16px 0 24px; }
 .feature { padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .feature h3 { margin: 0 0 6px; color: var(--text); font-size: 15px; }
 .feature p { margin: 0; color: var(--muted); font-size: 13px; }
@@ -480,6 +481,10 @@ body:not([data-view="test"]) #tester { display: none !important; }
 
 /* ---------- 좁은 화면 ---------- */
 
+@media (max-width: 1280px) {
+  .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 900px) {
   body { flex-direction: column; }
   #rail { width: auto; flex-direction: row; align-items: center; gap: 12px; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--border); }
@@ -517,6 +522,7 @@ button.profile { width: 100%; text-align: left; white-space: normal; }
 .device-art-wrap:has(.device-photo) { flex-direction: column; gap: 8px; height: auto; min-height: 210px; padding: 14px; }
 .device-photo { display: block; width: 100%; height: 210px; object-fit: contain; border-radius: 12px; }
 @media (max-width: 600px) {
+  .feature-grid { grid-template-columns: 1fr; }
   .dpi-row { flex-wrap: wrap; }
   .dpi-row input[type=range] { min-width: 100px; }
   .tabs { display: flex; flex-wrap: wrap; }
