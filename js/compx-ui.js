@@ -322,6 +322,7 @@ function backupRanges(m, cur) {
     [F.keys, 4 * C.BUTTON_NAMES.length], pair(F.debounce), pair(F.motionSync), pair(F.angleSnap), pair(F.ripple),
     pair(F.sleep), pair(F.performanceTime)];
   if (cx.model.lod) ranges.push(pair(F.lod));
+  if (cx.model.brand === 'ATK' && m.sensorMode !== null && cur.sensorMode !== null) ranges.push(pair(F.sensorMode));
   if (cx.model.lighting && m.hasDpiLight && cur.hasDpiLight) ranges.push([F.dpiColor, 4 * m.stageCount], [F.dpiLightMode, 8]);
   return ranges;
 }
@@ -342,7 +343,9 @@ function checkBackup(b) {
   if (b.vendorId !== cx.dev.vendorId || b.cid !== cx.info.cid || b.mid !== cx.info.mid) {
     throw new Error(t('이 기종과 맞지 않는 백업입니다 ({device}).', { device: b.device || t('알 수 없는 기기') }));
   }
-  const img = fromHex(b.image);
+  let img = fromHex(b.image);
+  // 센서 모드를 읽기 전의 백업은 짧다. 그 뒤 칸은 기기에 지금 있는 값으로 채워서 바꾸지 않는다.
+  if (img.length === C.OLD_IMAGE_LENGTH) img = Uint8Array.from([...img, ...cx.work.subarray(C.OLD_IMAGE_LENGTH, C.IMAGE_LENGTH)]);
   if (img.length !== C.IMAGE_LENGTH) throw new Error(t('백업 데이터가 손상되었습니다.'));
   const m = C.parse(img, cx.model);
   const cur = C.parse(cx.work, cx.model);
@@ -359,6 +362,7 @@ function checkBackup(b) {
     !(cx.model.debounce.includes(m.debounce) || m.debounce === cur.debounce) && '디바운스',
     !(cx.model.sleep.some(([v]) => v === m.sleep) || m.sleep === cur.sleep) && '자동 절전',
     ![F.motionSync, F.angleSnap, F.ripple].every((a) => img[a] <= 1) && '센서 설정',
+    cx.model.brand === 'ATK' && m.sensorMode !== null && cur.sensorMode !== null && !sensorModes(cur).some(([v]) => v === m.sensorMode) && '센서 모드',
     cx.model.lighting && m.hasDpiLight && !m.dpiColors.slice(0, m.stageCount).every(Boolean) && '표시등 색',
     !m.keys.some((k) => k.cls === 1 && k.param === 0x0100) && '왼쪽 클릭',
     !backupMacros(b, m).every(Boolean) && '매크로',
@@ -457,7 +461,19 @@ function renderPerformance(m) {
     h('div', { class: 'toggle-list' },
       toggle(t('모션 싱크'), t('센서 판독을 보고 주기에 맞춥니다.'), m.motionSync, C.FLASH.motionSync),
       toggle(t('각도 스냅'), t('직선에 가까운 움직임을 곧게 보정합니다.'), m.angleSnap, C.FLASH.angleSnap),
-      toggle(t('리플 컨트롤'), t('높은 DPI에서 생기는 미세한 떨림을 줄입니다.'), m.ripple, C.FLASH.ripple)));
+      toggle(t('리플 컨트롤'), t('높은 DPI에서 생기는 미세한 떨림을 줄입니다.'), m.ripple, C.FLASH.ripple)),
+    sensorModeField(m));
+}
+
+// ATK의 센서 모드(웹허브의 「센서 샘플링 레이트」). 마우스가 이 칸을 쓰는 펌웨어일 때만 보인다.
+// 웹허브처럼 경기용 MAX는 CID 1 기종에만 내놓고, 이미 MAX로 저장된 기기는 그대로 보여 준다.
+const sensorModes = (m) => C.SENSOR_MODES.filter(([v]) => v < 2 || cx.info.cid === 1 || m.sensorMode === 2);
+function sensorModeField(m) {
+  if (cx.model.brand !== 'ATK' || m.sensorMode === null) return null;
+  return h('div', null,
+    field(t('센서 모드'), null, choice(t('센서 모드'), translated(sensorModes(m)), m.sensorMode, false, scalar(C.FLASH.sensorMode))),
+    h('p', { class: 'hint field-desc' }, t('ATK 웹허브의 「센서 샘플링 레이트」입니다. 경기용은 센서를 더 높은 스캔 주파수로 동작시켜 반응이 빨라지고 배터리를 더 씁니다.'),
+      ' ', t('아직 실기기로 저장을 확인하지 않은 항목입니다. 저장한 뒤 ATK 웹허브에서 같은 값으로 보이는지 확인해 주세요.')));
 }
 
 // 매크로 반복 방식: [저장 값, 이름]. 1~252는 횟수다.

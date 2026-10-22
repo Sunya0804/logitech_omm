@@ -222,8 +222,7 @@ try {
   await page.locator('#confirm-ok').click();
   await page.waitForFunction(() => /프로필이 4에서 1/.test(document.querySelector('#confirm-body')?.innerText || ''));
   await page.locator('#confirm-ok').click();
-  await page.waitForFunction(() => !OMM.state.busy);
-  assert.match(await page.locator('#toasts').textContent(), /돌아오지 않아 저장하지 않았습니다/);
+  await page.waitForFunction(() => !OMM.state.busy && /돌아오지 않아 저장하지 않았습니다/.test(document.querySelector('#toasts').textContent));
   assert.equal(await page.evaluate(() => [atk.writes.length, OMM.compxUi.isDirty()].join()), '0,true');
   await page.evaluate(() => { atk._handle = atk._originalHandle; atk.profile = 3; OMM.compxUi.revert(); document.querySelector('#toasts').replaceChildren(); });
 
@@ -414,6 +413,19 @@ try {
   assert.equal(await page.getByRole('button', { name: '리프트오프 거리 올리기' }).isDisabled(), true);
   await page.locator('#btn-revert').click();
   assert.equal(await page.evaluate(() => OMM.compxUi.isDirty()), false);
+
+  // ATK 센서 모드: CID 1 기종은 경기용 MAX까지 고를 수 있고, 주소 185·186(검사 바이트)에 저장한다.
+  const modes = page.getByRole('group', { name: '센서 모드' });
+  assert.deepEqual(await modes.locator('button').allInnerTexts(), ['기본', '경기용', '경기용 MAX']);
+  await modes.getByRole('button', { name: '경기용 MAX' }).click();
+  await saveNow();
+  assert.deepEqual(await page.evaluate(() => Array.from(OMM.compxUi.state.dev.dev.flash.subarray(185, 187))), [2, 0x53]);
+  // 센서 모드를 읽기 전에 만든 185바이트 백업도 불러온다. 센서 모드는 기기 값 그대로 둔다.
+  const sensorBackup = JSON.parse(await fs.readFile(await exportFile(), 'utf8'));
+  await page.locator('#import-file').setInputFiles({ name: 'old.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ ...sensorBackup, image: sensorBackup.image.slice(0, 370) })) });
+  await page.waitForFunction(() => /불러왔습니다/.test(toastLog.at(-1)));
+  assert.equal(await page.evaluate(() => OMM.compx.parse(OMM.compxUi.state.work).sensorMode), 2);
 
   // MCHOSE 백업: 편집 허용 전에는 불러오기가 막히고, 맞지 않는 값은 빼고 불러온다
   await page.locator('#btn-disconnect').click();

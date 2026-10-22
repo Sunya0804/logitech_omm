@@ -25,8 +25,11 @@ const FLASH = {
   dpiLightMode: 76, dpiLightBrightness: 78, dpiLightSpeed: 80, dpiLightState: 82,
   keys: 96, // 버튼당 4바이트 × 6
   debounce: 169, motionSync: 171, sleep: 173, angleSnap: 175, ripple: 177, performanceTime: 183,
+  sensorMode: 185, // ATK 웹허브의 「센서 샘플링 레이트」: 0 기본, 1 경기용 펌웨어, 2 경기용 펌웨어 MAX
 };
-const IMAGE_LENGTH = 185;
+const IMAGE_LENGTH = 187;
+const OLD_IMAGE_LENGTH = 185; // 센서 모드를 읽기 전에 만든 백업의 길이
+const SENSOR_MODES = [[0, '기본'], [1, '경기용'], [2, '경기용 MAX']];
 const DPI_SLOTS = 8;
 const BUTTON_NAMES = ['왼쪽', '오른쪽', '휠 클릭', '뒤로', '앞으로', 'DPI 버튼'];
 const DPI_MIN = 50;
@@ -234,6 +237,8 @@ function parse(image, model = MODELS.vgn) {
     stageCount: image[FLASH.stageCount], currentStage: image[FLASH.currentStage], stages,
     maxStages: usable < 0 ? DPI_SLOTS : usable,
     lod: image[FLASH.lod], debounce: image[FLASH.debounce], sleep: image[FLASH.sleep],
+    // 검사 바이트가 맞고 알려진 값일 때만 센서 모드로 본다. 이 칸을 쓰지 않는 펌웨어는 null.
+    sensorMode: image[FLASH.sensorMode + 1] === check(image[FLASH.sensorMode]) && image[FLASH.sensorMode] <= 2 ? image[FLASH.sensorMode] : null,
     motionSync: image[FLASH.motionSync] === 1, angleSnap: image[FLASH.angleSnap] === 1, ripple: image[FLASH.ripple] === 1,
     keys: BUTTON_NAMES.map((_, i) => decodeKey(image, i)),
     hasDpiLight: hasDpiLight(image), dpiLight: decodeDpiLight(image),
@@ -419,7 +424,7 @@ class CompxDevice {
 const filters = VENDOR_IDS.map((vendorId) => ({ vendorId }));
 
 export {
-  filters, VENDOR_IDS, VENDOR_VGN, VENDOR_ATK, MODELS, modelFor, FLASH, IMAGE_LENGTH, DPI_SLOTS, DPI_MIN, DPI_MAX, DPI_STEP, DEBOUNCE_MAX,
+  filters, VENDOR_IDS, VENDOR_VGN, VENDOR_ATK, MODELS, modelFor, FLASH, IMAGE_LENGTH, OLD_IMAGE_LENGTH, SENSOR_MODES, DPI_SLOTS, DPI_MIN, DPI_MAX, DPI_STEP, DEBOUNCE_MAX,
   BUTTON_NAMES, RATES, LOD, SLEEP, KEY_ACTIONS, PROFILE_COUNT, DPI_LIGHT, DPI_LIGHT_SPEED_MAX, BRIGHTNESS,
   parse, decodeRate, encodeRate, decodeDpi, setDpi, snapDpi, setScalar, decodeKey, setKey, diffRuns, check,
   decodeDpiColor, setDpiColor, setDpiLightKind,

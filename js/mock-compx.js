@@ -21,6 +21,7 @@ function defaultImage() {
   C.setScalar(img, F.angleSnap, 0);
   C.setScalar(img, F.ripple, 0);
   C.setScalar(img, F.performanceTime, 30);
+  C.setScalar(img, F.sensorMode, 0);
   [[255, 0, 0], [0, 0, 255], [0, 255, 0], [255, 255, 0], [0, 255, 255], [255, 0, 255], [255, 255, 255], [255, 128, 0]].forEach((c, i) => C.setDpiColor(img, i, c));
   C.setScalar(img, F.dpiLightMode, 1);
   C.setScalar(img, F.dpiLightBrightness, 128);

@@ -798,4 +798,9 @@ export default {
   "{values} 중 하나를 입력하세요.": "Enter one of {values}.",
   "{label} 올리기": "Increase {label}",
   "{label} 내리기": "Decrease {label}",
+  "센서 모드": "Sensor mode",
+  "경기용": "Competitive",
+  "경기용 MAX": "Competitive MAX",
+  "ATK 웹허브의 「센서 샘플링 레이트」입니다. 경기용은 센서를 더 높은 스캔 주파수로 동작시켜 반응이 빨라지고 배터리를 더 씁니다.": "This is \"Sensor Sampling Rate\" in the ATK web hub. Competitive modes run the sensor at a higher scan rate for faster response and use more battery.",
+  "아직 실기기로 저장을 확인하지 않은 항목입니다. 저장한 뒤 ATK 웹허브에서 같은 값으로 보이는지 확인해 주세요.": "Saving this has not been confirmed on a real mouse yet. After saving, check that the ATK web hub shows the same value.",
 };

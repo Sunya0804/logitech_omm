@@ -58,3 +58,17 @@ test('diffRuns groups changed bytes into packets', () => {
 test('report rates encode both ways', () => {
   for (const hz of C.RATES) assert.equal(C.decodeRate(C.encodeRate(hz)), hz);
 });
+
+test('sensor mode is read only when its check byte matches', () => {
+  // ATK 웹허브: 주소 185에 0 기본, 1 경기용, 2 경기용 MAX, 186에 검사 바이트(0x55 - 값)
+  const img = image().fill(0xff);
+  assert.equal(C.parse(img, ultra).sensorMode, null);
+  C.setScalar(img, C.FLASH.sensorMode, 2);
+  assert.deepEqual(Array.from(img.subarray(185, 187)), [2, 0x53]);
+  assert.equal(C.parse(img, ultra).sensorMode, 2);
+  img[186] ^= 1;
+  assert.equal(C.parse(img, ultra).sensorMode, null);
+  img[185] = 3;
+  img[186] = 0x52;
+  assert.equal(C.parse(img, ultra).sensorMode, null);
+});
