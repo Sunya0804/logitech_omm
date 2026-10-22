@@ -15,34 +15,67 @@ const VENDOR_HUBS = {
   0x514b: { name: 'Qwertykeys', page: 'https://cfg.qwertykeys.com/#/', url: (id) => `https://cfg.qwertykeys.com/definitions/v3/${id}.json` },
 };
 
-// 이 사이트에 함께 실은 제작사 정의 파일 (definitions/README.md에 출처·날짜·해시). 키: vendorProductId
+// 이 사이트에 함께 실은 제작사 정의 파일 (definitions/README.md에 출처·날짜·해시). 키: vendorProductId.
+// 같은 ID를 여러 키보드가 쓰면 배열로 두고 사용자가 고른다. 고른 파일은 이 브라우저에 기억해 다음부터 바로 쓴다.
 const BUNDLED = {
   1363889410: { name: 'Qwertykeys QK80 MK2', path: 'definitions/qwertykeys/1363889410.json', fetchedAt: '2026-10-18' },
+  1363889411: { name: 'Qwertykeys QK65 MK3', path: 'definitions/qwertykeys/1363889411.json', fetchedAt: '2026-10-23' },
+  // 4E45:3830은 Neo80 유선 PCB와 Neo80 Cu 유선·솔더 PCB가 같이 쓴다. 유선 PCB 파일이 나머지 둘의 키를 모두 담고 있어 그것을 싣는다.
+  1313159216: { name: 'Neo80 (wired PCB)', path: 'definitions/neo/1313159216.json', fetchedAt: '2026-10-23' },
+  4294836278: { name: 'Neo80 (tri-mode PCB)', path: 'definitions/neo/4294836278.json', fetchedAt: '2026-10-23' },
+  917516482: { name: 'Neo80 Cu (tri-mode ANSI)', path: 'definitions/neo/917516482.json', fetchedAt: '2026-10-23' },
+  917516504: { name: 'Neo80 Cu (tri-mode ISO)', path: 'definitions/neo/917516504.json', fetchedAt: '2026-10-23' },
+  917516302: { name: 'Evoworks Evo80', path: 'definitions/evoworks/917516302.json', fetchedAt: '2026-10-23' },
+  // 320F:5055(유선)·320F:5088(2.4G 수신기)는 WOBKEY Crush 80(RGB·non-RGB)과 archon RE:AL HX가 함께 쓴다. usevia.app의 같은 ID는 GMMK Numpad다.
+  839864405: [
+    { name: 'WOBKEY Crush 80 (RGB)', path: 'definitions/wobkey/839864405-rgb.json', fetchedAt: '2026-10-23' },
+    { name: 'WOBKEY Crush 80 (non-RGB)', path: 'definitions/wobkey/839864405-lite.json', fetchedAt: '2026-10-23' },
+    { name: 'archon RE:AL HX', path: 'definitions/archon/839864405.json', fetchedAt: '2026-10-23' },
+  ],
+  839864456: [
+    { name: 'WOBKEY Crush 80 (RGB)', path: 'definitions/wobkey/839864456-rgb.json', fetchedAt: '2026-10-23' },
+    { name: 'WOBKEY Crush 80 (non-RGB)', path: 'definitions/wobkey/839864456-lite.json', fetchedAt: '2026-10-23' },
+    { name: 'archon RE:AL HX', path: 'definitions/archon/839864456.json', fetchedAt: '2026-10-23' },
+  ],
 };
+// 내장 파일 목록 [{id, name, path, fetchedAt}] (시험용)
+const bundledList = () => Object.entries(BUNDLED).flatMap(([id, v]) => [v].flat().map((b) => ({ id: +id, ...b })));
 
-// 이 키보드의 정의 파일을 받을 곳: [{kind: 'bundled' | 'fetch' | 'link', name, url, page?, fetchedAt?}]
-// bundled와 fetch는 fetchDefinition이 이 순서로 자동으로 받고, link는 사용자가 받아 불러온다.
+// 이 키보드의 정의 파일을 받을 곳: [{kind: 'bundled' | 'choice' | 'fetch' | 'link', name, url, page?, fetchedAt?}]
+// bundled와 fetch는 fetchDefinition이 이 순서로 자동으로 받고, choice는 사용자가 고르며, link는 사용자가 받아 불러온다.
 function definitionSources(vendorId, productId) {
   const id = vendorProductId(vendorId, productId);
   const hub = VENDOR_HUBS[vendorId];
-  const bundled = BUNDLED[id];
+  const bundled = [BUNDLED[id] ?? []].flat();
   return [
-    ...(bundled ? [{ kind: 'bundled', name: bundled.name, url: bundled.path, fetchedAt: bundled.fetchedAt }] : []),
+    ...bundled.map((b) => ({ kind: bundled.length > 1 ? 'choice' : 'bundled', name: b.name, url: b.path, fetchedAt: b.fetchedAt })),
     { kind: 'fetch', name: 'VIA', url: USEVIA(id) },
     ...(hub ? [{ kind: 'link', name: hub.name, url: hub.url(id), page: hub.page }] : []),
   ];
 }
 
+// 한 곳에서 정의 파일을 받아 이 키보드의 것인지 확인한다. 아니면 null.
+async function fetchSource(source, vendorId, productId, fetchFn = fetch) {
+  try {
+    const res = await fetchFn(source.url);
+    if (!res.ok || !/json/.test(res.headers.get('content-type') || '')) return null;
+    const json = await res.json();
+    const def = parseDefinition(json);
+    return def.vendorId === vendorId && def.productId === productId ? { json, def, source } : null;
+  } catch {
+    return null;
+  }
+}
+
 // 받아 갈 수 있는 곳에서 정의 파일을 찾는다. 없으면 null. (usevia.app은 없는 파일에도 HTML로 200을 돌려준다.)
-async function fetchDefinition(vendorId, productId, fetchFn = fetch) {
-  for (const source of definitionSources(vendorId, productId).filter((s) => s.kind !== 'link')) {
-    try {
-      const res = await fetchFn(source.url);
-      if (!res.ok || !/json/.test(res.headers.get('content-type') || '')) continue;
-      const json = await res.json();
-      const def = parseDefinition(json);
-      if (def.vendorId === vendorId && def.productId === productId) return { json, def, source };
-    } catch { /* 다음 곳을 본다 */ }
+// 같은 ID를 여러 키보드가 쓰면 어느 것인지 알 수 없으므로, force가 아니면 사용자가 고르도록 null을 돌려준다.
+// force(「자동으로 찾기」)면 내장 후보를 건너뛰고 VIA 목록만 본다.
+async function fetchDefinition(vendorId, productId, fetchFn = fetch, { force = false } = {}) {
+  const sources = definitionSources(vendorId, productId);
+  if (!force && sources.some((s) => s.kind === 'choice')) return null;
+  for (const source of sources.filter((s) => s.kind === 'bundled' || s.kind === 'fetch')) {
+    const found = await fetchSource(source, vendorId, productId, fetchFn);
+    if (found) return found;
   }
   return null;
 }
@@ -351,7 +384,7 @@ function visibleKeys(def, choices) {
 }
 
 export {
-  vendorProductId, definitionSources, fetchDefinition, rememberDefinition, rememberedDefinition, forgetDefinition,
+  vendorProductId, definitionSources, fetchDefinition, fetchSource, bundledList, rememberDefinition, rememberedDefinition, forgetDefinition,
   parseKle, parseMenus, parseDefinition, evaluateShowIf, encodeValue, decodeValue,
   decodeLayoutOptions, encodeLayoutOptions, visibleKeys, VENDOR_HUBS, BUNDLED,
 };

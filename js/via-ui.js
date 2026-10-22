@@ -2,7 +2,7 @@
 import { ViaDevice, filters } from './via.js';
 import { ViaSession, readVialDefinition } from './via-session.js';
 import { SETTINGS as QMK_SETTINGS } from './vial-settings.js';
-import { definitionSources, fetchDefinition, rememberedDefinition, rememberDefinition, forgetDefinition } from './via-definition.js';
+import { definitionSources, fetchDefinition, fetchSource, rememberedDefinition, rememberDefinition, forgetDefinition } from './via-definition.js';
 import { parseKeycode, withMods, modTap, layerTap, splitCombo } from './via-keycodes.js';
 import { exportViaLayout, importViaLayout } from './via-layout-file.js';
 import { encodeMacro } from './via-macro.js';
@@ -55,19 +55,32 @@ async function loadDefinition(json, setMsg, source, remember = false) {
 }
 
 // 정의 파일을 찾는 출처 문구 (언어를 바꿔도 따라가도록 그릴 때 번역한다)
-const foundSource = (found) => (found.source.kind === 'bundled' ? () => t('내장 정의 파일 ({date} 받음)', { date: found.source.fetchedAt }) : found.source.url);
+const foundSource = (found) => (found.source.kind === 'bundled' || found.source.kind === 'choice' ? () => t('내장 정의 파일 ({date} 받음)', { date: found.source.fetchedAt }) : found.source.url);
 
 // 직접 불러온 파일 대신 내장 사본·VIA 목록에서 다시 찾는다. 찾으면 기억한 파일을 지운다.
 async function findAutomatically() {
   const dev = state.dev;
   if (!dev || app.busy) return;
   await busy(t('정의 파일 찾는 중…'), async (setMsg) => {
-    const found = await fetchDefinition(dev.vendorId, dev.productId);
+    const found = await fetchDefinition(dev.vendorId, dev.productId, fetch, { force: true });
     if (!found) { state.error = t('이 키보드의 정의 파일을 자동으로 찾지 못했습니다. 파일을 직접 불러오세요.'); return; }
     try {
       await loadDefinition(found.json, setMsg, foundSource(found));
       forgetDefinition(dev.vendorId, dev.productId);
     } catch (e) { state.error = e.message; }
+  });
+  shell.refresh();
+}
+
+// 같은 ID를 쓰는 키보드가 여럿일 때 사용자가 고른 내장 정의 파일. 다음부터 바로 쓰도록 이 브라우저에 기억한다.
+async function pickBundled(source) {
+  const dev = state.dev;
+  if (!dev || app.busy) return;
+  await busy(t('키보드 정보 읽는 중…'), async (setMsg) => {
+    const found = await fetchSource(source, dev.vendorId, dev.productId);
+    if (!found) { state.error = t('내장 정의 파일({name})을 읽지 못했습니다.', { name: source.name }); return; }
+    try { await loadDefinition(found.json, setMsg, foundSource(found), true); }
+    catch (e) { state.error = e.message; }
   });
   shell.refresh();
 }
@@ -131,13 +144,18 @@ function definitionLoader() {
   const dev = state.dev;
   const input = h('input', { type: 'file', accept: '.json,application/json', id: 'via-definition', onchange: (e) => importDefinition(e.target.files[0]) });
   const back = () => { Object.assign(state, { session: state.previous.session, source: state.previous.source, previous: null, error: '' }); shell.refresh(); };
+  const sources = definitionSources(dev.vendorId, dev.productId);
+  const choices = sources.filter((s) => s.kind === 'choice');
   return h('section', { class: 'via-loader' },
     h('h3', null, t('정의 파일 불러오기')),
     h('p', null, `${dev.name} · ${hexId(dev.vendorId, dev.productId)}`),
+    choices.length > 0 && h('div', { class: 'via-choices' },
+      h('p', { class: 'hint' }, t('이 ID({id})는 여러 키보드가 함께 씁니다. 연결한 키보드를 고르세요. 「자동으로 찾기」는 VIA 공식 목록만 봅니다.', { id: hexId(dev.vendorId, dev.productId) })),
+      h('div', { class: 'row-actions' }, choices.map((s) => h('button', { type: 'button', disabled: app.busy, 'data-choice': s.url, onclick: () => pickBundled(s) }, s.name)))),
     h('div', { class: 'row-actions' },
       state.previous && h('button', { id: 'via-definition-back', disabled: app.busy, onclick: back }, t('취소하고 돌아가기')),
       h('button', { class: 'ghost', id: 'via-definition-auto', disabled: app.busy, onclick: findAutomatically }, t('자동으로 찾기'))),
-    definitionSources(dev.vendorId, dev.productId).filter((s) => s.kind === 'link').map((s) => h('div', { class: 'row-actions' },
+    sources.filter((s) => s.kind === 'link').map((s) => h('div', { class: 'row-actions' },
       h('a', { href: s.url, target: '_blank', rel: 'noopener' }, t('정의 파일 받기 ({name})', { name: s.name })),
       h('a', { href: s.page, target: '_blank', rel: 'noopener' }, t('제작사 웹 허브 열기')))),
     h('p', { class: 'hint' }, t('받은 JSON 파일을 아래에서 불러오세요. 한 번 불러오면 이 브라우저가 기억합니다.')),

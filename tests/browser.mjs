@@ -681,6 +681,25 @@ try {
   assert.match(await page.locator('.via-loader [role=alert]').innerText(), /could not find/i);
   assert.equal(await page.evaluate(() => localStorage.length), 1);
   await page.evaluate(() => localStorage.clear());
+  // 같은 ID를 여러 키보드가 쓰면(Crush 80·RE:AL HX, 320F:5055) 자동으로 받지 않고 고르게 한다. 고른 파일은 기억해 다음부터 바로 연다.
+  await page.unroute('**/definitions/**');
+  const crushLike = { vendorId: 0x320f, productId: 0x5055, productName: 'Crush 80', rows: 8, cols: 16 };
+  await page.evaluate(async (o) => { window.vm = makeVia(o); await OMM.connectVia([vm]); }, crushLike);
+  await page.waitForSelector('.via-loader [data-choice]');
+  assert.deepEqual(await page.locator('.via-loader [data-choice]').allInnerTexts(), ['WOBKEY Crush 80 (RGB)', 'WOBKEY Crush 80 (non-RGB)', 'archon RE:AL HX']);
+  assert.equal(await page.evaluate(() => !OMM.viaUi.state.session && localStorage.length), 0);
+  await page.locator('.via-loader [data-choice="definitions/archon/839864405.json"]').click();
+  await page.waitForSelector('.via-key');
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), 'RE:AL HX');
+  assert.match(await page.locator('.via-heading .hint').innerText(), /Bundled definition \(downloaded 2026-10-23\)/);
+  assert.equal(await page.evaluate(() => localStorage.length), 1);
+  await page.locator('#btn-disconnect').click();
+  await page.waitForFunction(() => !OMM.viaUi.connected());
+  await page.evaluate(async (o) => { window.vm = makeVia(o); await OMM.connectVia([vm]); }, crushLike);
+  await page.waitForSelector('.via-key');
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), 'RE:AL HX');
+  assert.match(await page.locator('.via-heading .hint').innerText(), /remembered in this browser/);
+  await page.evaluate(() => localStorage.clear());
   // 구형 프로토콜은 키맵만 막고 설정은 편집할 수 있다.
   await page.evaluate(async () => { window.vm = makeVia({ protocol: 11 }); await OMM.connectVia([vm], viaDef); });
   assert.equal(await page.locator('.via-key').first().isDisabled(), true);

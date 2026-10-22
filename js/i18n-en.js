@@ -10,6 +10,8 @@ export default {
   'JSON 파일을 골라 주세요.': 'Please choose a JSON file.',
   '정의 파일 불러오기': 'Load definition',
   '정의 파일 받기 ({name})': 'Download definition ({name})',
+  '이 ID({id})는 여러 키보드가 함께 씁니다. 연결한 키보드를 고르세요. 「자동으로 찾기」는 VIA 공식 목록만 봅니다.': 'Several keyboards share this ID ({id}). Pick the one you connected. "Find automatically" only checks the official VIA list.',
+  '내장 정의 파일({name})을 읽지 못했습니다.': 'Could not read the bundled definition ({name}).',
   '제작사 웹 허브 열기': 'Open vendor web hub',
   '받은 JSON 파일을 아래에서 불러오세요. 한 번 불러오면 이 브라우저가 기억합니다.': 'Load the downloaded JSON file below. This browser remembers it for next time.',
   'JSON 파일을 고르거나 여기로 끌어다 놓으세요.': 'Choose a JSON file or drop it here.',

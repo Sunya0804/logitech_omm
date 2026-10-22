@@ -55,7 +55,7 @@
 .via-macros button { text-align: left; }
 .via-macros small { display: block; color: var(--muted); overflow-wrap: anywhere; }
 .via-editor .macro-steps input[type=text] { width: 100%; min-width: 0; }
-.via-editor .row-actions { flex-wrap: wrap; }
+.via-editor .row-actions, .via-loader .row-actions { flex-wrap: wrap; }
 .via-editor .tabs { flex-wrap: wrap; }
 /* Vial: 잠금 안내, 잠금 풀기 키, 탭 댄스·콤보·키 오버라이드 줄 */
 .via-lock { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }

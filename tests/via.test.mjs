@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { ViaDevice, CMD } from '../js/via.js';
 import * as K from '../js/via-keycodes.js';
 import * as D from '../js/via-definition.js';
@@ -196,6 +197,41 @@ test('definition sources: bundled copy first, then VIA, then the Qwertykeys down
   const found = await D.fetchDefinition(0x514b, 0x4d02, json);
   assert.deepEqual([found.def.name, found.source.kind], ['Test Board', 'bundled']);
   assert.equal(await D.fetchDefinition(0x1111, 0x2222, json), null); // 다른 키보드의 파일
+});
+
+test('definition sources: keyboards that share one ID → the user picks a bundled copy', async () => {
+  const sources = D.definitionSources(0x320f, 0x5055);
+  assert.deepEqual(sources.map((s) => s.kind), ['choice', 'choice', 'choice', 'fetch']);
+  assert.deepEqual(sources.slice(0, 3).map((s) => s.name), ['WOBKEY Crush 80 (RGB)', 'WOBKEY Crush 80 (non-RGB)', 'archon RE:AL HX']);
+  const calls = [];
+  const json = async (url) => { calls.push(url); return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ ...RAW, vendorId: '0x320F', productId: '0x5055' }) }; };
+  // 고르기 전에는 아무것도 받지 않는다
+  assert.equal(await D.fetchDefinition(0x320f, 0x5055, json), null);
+  assert.deepEqual(calls, []);
+  // 「자동으로 찾기」는 내장 후보를 건너뛰고 VIA 목록만 본다
+  const found = await D.fetchDefinition(0x320f, 0x5055, json, { force: true });
+  assert.deepEqual([found.source.kind, calls], ['fetch', ['https://usevia.app/definitions/v3/839864405.json']]);
+  // 고른 후보는 그 파일만 받고, 다른 키보드의 파일이면 거절한다
+  const picked = await D.fetchSource(sources[2], 0x320f, 0x5055, json);
+  assert.deepEqual([picked.source.name, calls.at(-1)], ['archon RE:AL HX', 'definitions/archon/839864405.json']);
+  assert.equal(await D.fetchSource(sources[2], 0x320f, 0x5088, json), null);
+});
+
+test('every bundled definition file exists, parses, matches its ID and the README table', () => {
+  const readme = readFileSync(new URL('../definitions/README.md', import.meta.url), 'utf8');
+  const list = D.bundledList();
+  assert.ok(list.length >= 13);
+  for (const b of list) {
+    const bytes = readFileSync(new URL('../' + b.path, import.meta.url));
+    const def = D.parseDefinition(JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, '')));
+    assert.equal(def.vendorId * 65536 + def.productId, b.id, b.path);
+    assert.ok(def.keys.length > 0, b.path);
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const row = readme.split('\n').find((l) => l.includes('`' + b.path.replace('definitions/', '') + '`'));
+    assert.ok(row, 'README row: ' + b.path);
+    assert.ok(row.includes('`' + hash.slice(0, 8) + '…' + hash.slice(-6) + '`'), 'README hash: ' + b.path);
+    assert.ok(row.includes(b.fetchedAt), 'README date: ' + b.path);
+  }
 });
 
 test('macros: text, taps, presses and delays round-trip; unknown bytes stay untouched', () => {

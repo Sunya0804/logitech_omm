@@ -120,7 +120,8 @@ VIA(QMK) 키보드의 키맵·레이아웃 옵션·매크로·조명/설정 메�
 
 - 키보드마다 VIA 정의 파일(JSON)이 필요합니다. usevia.app 목록에 있는 키보드는 자동으로 받고, 없는 키보드는 제작사 웹 허브의 링크로 받은 파일을 불러옵니다.
   - 예: Qwertykeys QK80 MK2 → `https://cfg.qwertykeys.com/definitions/v3/1363889410.json`
-  - QK80 MK2는 제작사 정의 파일을 사이트에 함께 실어 두어 바로 열립니다([definitions/README.md](definitions/README.md), 이 저장소의 라이선스 대상 아님). 사용자가 직접 불러온 파일이 있으면 그쪽을 먼저 씁니다.
+  - 다음 키보드는 제작사 정의 파일을 사이트에 함께 실어 두어 바로 열립니다([definitions/README.md](definitions/README.md)에 출처·해시, 이 저장소의 라이선스 대상 아님): Qwertykeys QK80 MK2·QK65 MK3, Neo80(유선·트라이모드 PCB)·Neo80 Cu(트라이모드 ANSI·ISO), Evoworks Evo80, WOBKEY Crush 80(RGB·non-RGB, 유선·2.4G), archon RE:AL HX(유선·2.4G). 사용자가 직접 불러온 파일이 있으면 그쪽을 먼저 씁니다. QK80 MK2 외에는 실기기로 확인하지 않았습니다.
+  - Crush 80과 RE:AL HX는 같은 USB ID(유선 320F:5055, 2.4G 수신기 320F:5088)를 쓰고 usevia.app의 같은 ID는 GMMK Numpad입니다. 이런 ID는 자동으로 받지 않고 연결 화면에서 키보드를 고르게 하며, 고른 파일은 브라우저가 기억해 다음부터 바로 엽니다. Neo80 Cu의 유선·솔더 PCB는 Neo80 유선 PCB와 같은 ID(4E45:3830)라 유선 PCB 파일(키가 가장 많음)이 열립니다.
 - 키 코드는 VIA 프로토콜 12(QMK 0.19 이후 체계)만 편집합니다. 그보다 오래된 키보드는 읽기만 합니다.
 - VIA 앱의 「Save + Load」 레이아웃 파일(.layout.json)을 불러오고 내보낼 수 있습니다(키맵·인코더·매크로). 불러온 내용은 저장을 눌러야 기록됩니다.
 - 공장 초기화·부트로더 진입·키맵 초기화 명령은 보내지 않습니다. 초기화 같은 메뉴 동작은 값으로 읽지도 않습니다.
