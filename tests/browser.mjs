@@ -687,6 +687,9 @@ try {
   await page.evaluate(async (o) => { window.vm = makeVia(o); await OMM.connectVia([vm]); }, crushLike);
   await page.waitForSelector('.via-loader [data-choice]');
   assert.deepEqual(await page.locator('.via-loader [data-choice]').allInnerTexts(), ['WOBKEY Crush 80 (RGB)', 'WOBKEY Crush 80 (non-RGB)', 'archon RE:AL HX']);
+  // 제품 이름 'Crush 80'과 맞는 두 후보만 강조된다
+  assert.deepEqual(await page.locator('.via-loader [data-choice][data-matched]').allInnerTexts(), ['WOBKEY Crush 80 (RGB)', 'WOBKEY Crush 80 (non-RGB)']);
+  assert.match(await page.locator('.via-choices .hint').innerText(), /reports \(Crush 80\)/);
   assert.equal(await page.evaluate(() => !OMM.viaUi.state.session && localStorage.length), 0);
   await page.locator('.via-loader [data-choice="definitions/archon/839864405.json"]').click();
   await page.waitForSelector('.via-key');
@@ -700,6 +703,14 @@ try {
   assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), 'RE:AL HX');
   assert.match(await page.locator('.via-heading .hint').innerText(), /remembered in this browser/);
   await page.evaluate(() => localStorage.clear());
+  // 제품 이름이 한 후보와만 맞으면(RE:AL HX) 고르지 않고 바로 연다. 기억하지는 않는다.
+  await page.locator('#btn-disconnect').click();
+  await page.waitForFunction(() => !OMM.viaUi.connected());
+  await page.evaluate(async (o) => { window.vm = makeVia(o); await OMM.connectVia([vm]); }, { ...crushLike, productName: 'RE:AL HX' });
+  await page.waitForSelector('.via-key');
+  assert.equal(await page.evaluate(() => OMM.viaUi.state.session.def.name), 'RE:AL HX');
+  assert.match(await page.locator('.via-heading .hint').innerText(), /Bundled definition \(downloaded 2026-10-23\)/);
+  assert.equal(await page.evaluate(() => localStorage.length), 0);
   // 구형 프로토콜은 키맵만 막고 설정은 편집할 수 있다.
   await page.evaluate(async () => { window.vm = makeVia({ protocol: 11 }); await OMM.connectVia([vm], viaDef); });
   assert.equal(await page.locator('.via-key').first().isDisabled(), true);

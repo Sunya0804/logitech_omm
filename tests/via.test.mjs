@@ -217,6 +217,25 @@ test('definition sources: keyboards that share one ID → the user picks a bundl
   assert.equal(await D.fetchSource(sources[2], 0x320f, 0x5088, json), null);
 });
 
+test('definition sources: the USB product name narrows the shared-ID candidates', async () => {
+  const kinds = (name) => D.definitionSources(0x320f, 0x5055, name).map((s) => `${s.kind}${s.matched ? '*' : ''}`);
+  // 이름이 한 후보와만 맞으면 그것을 자동으로 받는다
+  assert.deepEqual(kinds('RE:AL HX'), ['choice', 'choice', 'bundled*', 'fetch']);
+  assert.deepEqual(kinds('Crush 80 Pro'), ['bundled*', 'choice', 'choice', 'fetch']);
+  assert.deepEqual(kinds('Crush80 Lite'), ['choice', 'bundled*', 'choice', 'fetch']);
+  // 'Crush 80'만으로는 RGB·non-RGB를 가릴 수 없어 둘 다 표시만 하고 고르게 한다
+  assert.deepEqual(kinds('Crush 80'), ['choice*', 'choice*', 'choice', 'fetch']);
+  assert.deepEqual(kinds('GMMK Numpad'), ['choice', 'choice', 'choice', 'fetch']);
+  const calls = [];
+  const json = async (url) => { calls.push(url); return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ ...RAW, vendorId: '0x320F', productId: '0x5055' }) }; };
+  const found = await D.fetchDefinition(0x320f, 0x5055, json, { productName: 'RE:AL HX' });
+  assert.deepEqual([found.source.name, calls], ['archon RE:AL HX', ['definitions/archon/839864405.json']]);
+  assert.equal(await D.fetchDefinition(0x320f, 0x5055, json, { productName: 'Crush 80' }), null);
+  assert.equal(calls.length, 1);
+  // 하나뿐인 내장 파일은 이름과 무관하게 받는다
+  assert.deepEqual(D.definitionSources(0x514b, 0x4d02, 'anything').map((s) => s.kind), ['bundled', 'fetch', 'link']);
+});
+
 test('every bundled definition file exists, parses, matches its ID and the README table', () => {
   const readme = readFileSync(new URL('../definitions/README.md', import.meta.url), 'utf8');
   const list = D.bundledList();

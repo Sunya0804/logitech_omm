@@ -100,7 +100,7 @@ export async function connect(devices, setMsg, json) {
   // 출처 문구는 언어를 바꿔도 따라가도록 그릴 때 번역한다
   let source = json ? () => t('직접 불러온 파일') : () => t('이 브라우저에 기억한 파일');
   if (!definition) {
-    const found = await fetchDefinition(vendorId, productId);
+    const found = await fetchDefinition(vendorId, productId, fetch, { productName: state.dev.name });
     definition = found?.json;
     source = found && foundSource(found);
   }
@@ -144,14 +144,16 @@ function definitionLoader() {
   const dev = state.dev;
   const input = h('input', { type: 'file', accept: '.json,application/json', id: 'via-definition', onchange: (e) => importDefinition(e.target.files[0]) });
   const back = () => { Object.assign(state, { session: state.previous.session, source: state.previous.source, previous: null, error: '' }); shell.refresh(); };
-  const sources = definitionSources(dev.vendorId, dev.productId);
+  const sources = definitionSources(dev.vendorId, dev.productId, dev.name);
   const choices = sources.filter((s) => s.kind === 'choice');
+  // 제품 이름과 맞는 후보가 둘 이상이면(예: Crush 80 RGB·non-RGB) 그것들을 앞에 두고 표시한다
+  choices.sort((a, b) => b.matched - a.matched);
   return h('section', { class: 'via-loader' },
     h('h3', null, t('정의 파일 불러오기')),
     h('p', null, `${dev.name} · ${hexId(dev.vendorId, dev.productId)}`),
     choices.length > 0 && h('div', { class: 'via-choices' },
-      h('p', { class: 'hint' }, t('이 ID({id})는 여러 키보드가 함께 씁니다. 연결한 키보드를 고르세요. 「자동으로 찾기」는 VIA 공식 목록만 봅니다.', { id: hexId(dev.vendorId, dev.productId) })),
-      h('div', { class: 'row-actions' }, choices.map((s) => h('button', { type: 'button', disabled: app.busy, 'data-choice': s.url, onclick: () => pickBundled(s) }, s.name)))),
+      h('p', { class: 'hint' }, t('이 ID({id})는 여러 키보드가 함께 씁니다. 키보드가 알려 준 이름({name})만으로는 가릴 수 없어 연결한 키보드를 고르세요. 「자동으로 찾기」는 VIA 공식 목록만 봅니다.', { id: hexId(dev.vendorId, dev.productId), name: dev.name })),
+      h('div', { class: 'row-actions' }, choices.map((s) => h('button', { type: 'button', class: s.matched ? 'primary' : '', disabled: app.busy, 'data-choice': s.url, 'data-matched': s.matched, onclick: () => pickBundled(s) }, s.name)))),
     h('div', { class: 'row-actions' },
       state.previous && h('button', { id: 'via-definition-back', disabled: app.busy, onclick: back }, t('취소하고 돌아가기')),
       h('button', { class: 'ghost', id: 'via-definition-auto', disabled: app.busy, onclick: findAutomatically }, t('자동으로 찾기'))),

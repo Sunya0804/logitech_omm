@@ -16,7 +16,8 @@ const VENDOR_HUBS = {
 };
 
 // 이 사이트에 함께 실은 제작사 정의 파일 (definitions/README.md에 출처·날짜·해시). 키: vendorProductId.
-// 같은 ID를 여러 키보드가 쓰면 배열로 두고 사용자가 고른다. 고른 파일은 이 브라우저에 기억해 다음부터 바로 쓴다.
+// 같은 ID를 여러 키보드가 쓰면 배열로 두고, 키보드가 USB로 보내는 제품 이름(productName)이 match와 맞는 후보가 하나뿐이면 그것을 자동으로 쓴다.
+// 이름으로 가릴 수 없으면 사용자가 고르고, 고른 파일은 이 브라우저에 기억해 다음부터 바로 쓴다.
 const BUNDLED = {
   1363889410: { name: 'Qwertykeys QK80 MK2', path: 'definitions/qwertykeys/1363889410.json', fetchedAt: '2026-10-18' },
   1363889411: { name: 'Qwertykeys QK65 MK3', path: 'definitions/qwertykeys/1363889411.json', fetchedAt: '2026-10-23' },
@@ -27,15 +28,16 @@ const BUNDLED = {
   917516504: { name: 'Neo80 Cu (tri-mode ISO)', path: 'definitions/neo/917516504.json', fetchedAt: '2026-10-23' },
   917516302: { name: 'Evoworks Evo80', path: 'definitions/evoworks/917516302.json', fetchedAt: '2026-10-23' },
   // 320F:5055(유선)·320F:5088(2.4G 수신기)는 WOBKEY Crush 80(RGB·non-RGB)과 archon RE:AL HX가 함께 쓴다. usevia.app의 같은 ID는 GMMK Numpad다.
+  // 제품 이름이 'Crush 80'뿐이면 RGB·non-RGB 둘 다 맞아 고르게 되고, 'Pro'/'RGB' 또는 'Lite'가 붙으면 하나로 가려진다. (실제 이름 문자열은 아직 확인하지 못했다.)
   839864405: [
-    { name: 'WOBKEY Crush 80 (RGB)', path: 'definitions/wobkey/839864405-rgb.json', fetchedAt: '2026-10-23' },
-    { name: 'WOBKEY Crush 80 (non-RGB)', path: 'definitions/wobkey/839864405-lite.json', fetchedAt: '2026-10-23' },
-    { name: 'archon RE:AL HX', path: 'definitions/archon/839864405.json', fetchedAt: '2026-10-23' },
+    { name: 'WOBKEY Crush 80 (RGB)', match: /crush(?!.*lite)/i, path: 'definitions/wobkey/839864405-rgb.json', fetchedAt: '2026-10-23' },
+    { name: 'WOBKEY Crush 80 (non-RGB)', match: /crush(?!.*(rgb|pro))/i, path: 'definitions/wobkey/839864405-lite.json', fetchedAt: '2026-10-23' },
+    { name: 'archon RE:AL HX', match: /re:?al|archon/i, path: 'definitions/archon/839864405.json', fetchedAt: '2026-10-23' },
   ],
   839864456: [
-    { name: 'WOBKEY Crush 80 (RGB)', path: 'definitions/wobkey/839864456-rgb.json', fetchedAt: '2026-10-23' },
-    { name: 'WOBKEY Crush 80 (non-RGB)', path: 'definitions/wobkey/839864456-lite.json', fetchedAt: '2026-10-23' },
-    { name: 'archon RE:AL HX', path: 'definitions/archon/839864456.json', fetchedAt: '2026-10-23' },
+    { name: 'WOBKEY Crush 80 (RGB)', match: /crush(?!.*lite)/i, path: 'definitions/wobkey/839864456-rgb.json', fetchedAt: '2026-10-23' },
+    { name: 'WOBKEY Crush 80 (non-RGB)', match: /crush(?!.*(rgb|pro))/i, path: 'definitions/wobkey/839864456-lite.json', fetchedAt: '2026-10-23' },
+    { name: 'archon RE:AL HX', match: /re:?al|archon/i, path: 'definitions/archon/839864456.json', fetchedAt: '2026-10-23' },
   ],
 };
 // 내장 파일 목록 [{id, name, path, fetchedAt}] (시험용)
@@ -43,12 +45,15 @@ const bundledList = () => Object.entries(BUNDLED).flatMap(([id, v]) => [v].flat(
 
 // 이 키보드의 정의 파일을 받을 곳: [{kind: 'bundled' | 'choice' | 'fetch' | 'link', name, url, page?, fetchedAt?}]
 // bundled와 fetch는 fetchDefinition이 이 순서로 자동으로 받고, choice는 사용자가 고르며, link는 사용자가 받아 불러온다.
-function definitionSources(vendorId, productId) {
+// productName을 주면 그 이름과 맞는 후보가 하나뿐일 때 그것을 bundled로 내려 자동으로 받게 하고, 나머지는 choice로 남긴다.
+function definitionSources(vendorId, productId, productName = '') {
   const id = vendorProductId(vendorId, productId);
   const hub = VENDOR_HUBS[vendorId];
   const bundled = [BUNDLED[id] ?? []].flat();
+  const named = productName ? bundled.filter((b) => b.match?.test(productName)) : [];
+  const auto = bundled.length === 1 ? bundled[0] : named.length === 1 ? named[0] : null;
   return [
-    ...bundled.map((b) => ({ kind: bundled.length > 1 ? 'choice' : 'bundled', name: b.name, url: b.path, fetchedAt: b.fetchedAt })),
+    ...bundled.map((b) => ({ kind: b === auto ? 'bundled' : 'choice', name: b.name, url: b.path, fetchedAt: b.fetchedAt, matched: named.includes(b) })),
     { kind: 'fetch', name: 'VIA', url: USEVIA(id) },
     ...(hub ? [{ kind: 'link', name: hub.name, url: hub.url(id), page: hub.page }] : []),
   ];
@@ -68,11 +73,11 @@ async function fetchSource(source, vendorId, productId, fetchFn = fetch) {
 }
 
 // 받아 갈 수 있는 곳에서 정의 파일을 찾는다. 없으면 null. (usevia.app은 없는 파일에도 HTML로 200을 돌려준다.)
-// 같은 ID를 여러 키보드가 쓰면 어느 것인지 알 수 없으므로, force가 아니면 사용자가 고르도록 null을 돌려준다.
+// 같은 ID를 여러 키보드가 쓰고 productName으로도 가릴 수 없으면, force가 아니면 사용자가 고르도록 null을 돌려준다.
 // force(「자동으로 찾기」)면 내장 후보를 건너뛰고 VIA 목록만 본다.
-async function fetchDefinition(vendorId, productId, fetchFn = fetch, { force = false } = {}) {
-  const sources = definitionSources(vendorId, productId);
-  if (!force && sources.some((s) => s.kind === 'choice')) return null;
+async function fetchDefinition(vendorId, productId, fetchFn = fetch, { force = false, productName = '' } = {}) {
+  const sources = definitionSources(vendorId, productId, productName);
+  if (!force && !sources.some((s) => s.kind === 'bundled') && sources.some((s) => s.kind === 'choice')) return null;
   for (const source of sources.filter((s) => s.kind === 'bundled' || s.kind === 'fetch')) {
     const found = await fetchSource(source, vendorId, productId, fetchFn);
     if (found) return found;
