@@ -33,13 +33,21 @@ async function disconnect() {
   app.demo = false;
 }
 
+// 기기 종류별 연결 창 필터. 키보드는 VIA 통신 칸이 있는 기기만 보인다.
+const FILTERS = {
+  mouse: () => [...logitech.filters, ...C.filters, ...mchoseUi.filters],
+  keyboard: () => viaUi.filters,
+};
+
 // 기기 선택 창을 띄우고, 고른 기기의 제조사에 맞는 방식으로 연결한다.
-async function requestConnect() {
+// 마우스 창에도 같은 제조사의 키보드가 보일 수 있어서, VIA 통신 칸이 있으면 키보드로 연결한다.
+async function requestConnect(kind = 'mouse') {
   try {
-    const picked = await navigator.hid.requestDevice({ filters: [...logitech.filters, ...C.filters, ...mchoseUi.filters, ...viaUi.filters] });
+    const picked = await navigator.hid.requestDevice({ filters: FILTERS[kind]() });
     if (!picked.length) return;
     const vendor = picked[0].vendorId;
     const via = picked.some(hasViaInterface);
+    if (kind === 'keyboard') return await connectWith(viaUi, picked, t('키보드 정보 읽는 중…'));
     // 제품 ID까지 아는 마우스 경로를 먼저 고른다. 제조사 ID만 같은 키보드는 VIA로 보낸다.
     if (mchoseUi.filters.some((f) => f.vendorId === vendor && (f.productId !== undefined ? picked.some((d) => d.productId === f.productId) : !via))) return await connectWith(mchoseUi, picked, t('MCHOSE 기기 읽는 중…'));
     if (C.VENDOR_IDS.includes(vendor) && !via) return await connectWith(compxUi, picked, t('기기 읽는 중…'));
@@ -121,7 +129,22 @@ async function connectDemo(kind) {
 // ---------- 화면 ----------
 
 const VIEW_TITLES = { home: '홈', config: '기기 설정', test: '마우스 테스트' };
+const CONFIG_TITLES = { mouse: '마우스 설정', keyboard: '키보드 설정' };
 let view = 'home';
+
+// 연결된 기기의 종류. 연결이 없으면 null.
+const activeKind = () => { const ui = active(); return ui ? (ui.summary().kind === 'keyboard' ? 'keyboard' : 'mouse') : null; };
+const viewTitle = (v) => t(v === 'config' ? CONFIG_TITLES[activeKind()] || VIEW_TITLES.config : VIEW_TITLES[v]);
+
+// 왼쪽 메뉴를 연결된 기기 종류에 맞춘다: 설정 이름을 바꾸고, 키보드에는 마우스 테스트를 숨긴다.
+function renderNav() {
+  const config = document.querySelector('#views [data-view=config]');
+  config.querySelector('span').textContent = viewTitle('config');
+  config.setAttribute('aria-label', viewTitle('config'));
+  document.querySelector('#views [data-view=test]').hidden = activeKind() === 'keyboard';
+  if (view === 'test' && activeKind() === 'keyboard') setView('home');
+  $('#page-title').textContent = viewTitle(view);
+}
 
 function setView(next) {
   if (next !== 'config') viaUi.suspend();
@@ -133,7 +156,7 @@ function setView(next) {
     if (on) btn.setAttribute('aria-current', 'page');
     else btn.removeAttribute('aria-current');
   }
-  $('#page-title').textContent = t(VIEW_TITLES[next]);
+  $('#page-title').textContent = viewTitle(next);
   if (next === 'config') viaUi.resume();
 }
 
@@ -191,7 +214,9 @@ function renderHome(ui) {
     h('article', { class: 'device-card add' },
       h('h3', null, t('다른 기기 연결')),
       h('p', { class: 'hint' }, t('한 번에 한 기기만 연결됩니다. 새 기기를 고르면 지금 기기와의 연결은 끊어집니다.')),
-      h('button', { onclick: requestConnect, disabled: !('hid' in navigator) }, t('+ 기기 선택'))));
+      h('div', { class: 'welcome-actions' },
+        h('button', { onclick: () => requestConnect('mouse'), disabled: !('hid' in navigator) }, t('+ 마우스')),
+        h('button', { onclick: () => requestConnect('keyboard'), disabled: !('hid' in navigator) }, t('+ 키보드')))));
 }
 
 function renderDeviceBar(ui) {
@@ -227,6 +252,7 @@ function render() {
   $('#actionbar').hidden = !connected;
   $('#btn-disconnect').hidden = !connected;
   $('#demo-banner').hidden = !(connected && app.demo);
+  renderNav();
   renderDeviceBar(ui);
   renderHome(ui);
   if (!ui) return;
@@ -263,7 +289,7 @@ function init() {
   $('#unsupported').hidden = supported;
   for (const btn of document.querySelectorAll('.btn-connect')) {
     btn.disabled = !supported;
-    btn.addEventListener('click', requestConnect);
+    btn.addEventListener('click', () => requestConnect(btn.dataset.kind));
   }
   for (const btn of document.querySelectorAll('#views button')) btn.addEventListener('click', () => setView(btn.dataset.view));
   for (const btn of document.querySelectorAll('[data-demo]')) btn.addEventListener('click', () => connectDemo(btn.dataset.demo));

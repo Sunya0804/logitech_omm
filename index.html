@@ -59,19 +59,34 @@
         <div class="hero">
           <span class="hero-badge" data-i18n>WebHID · 설치 없이 브라우저에서</span>
           <h2 data-i18n>마우스·키보드를 연결하세요</h2>
-          <p data-i18n>기기에 저장된 설정을 브라우저에서 바로 읽고 수정합니다. Logitech G, VGN, ATK·MCHOSE(지원 목록 기종) 마우스와 VIA 키보드를 지원합니다.</p>
+          <p data-i18n>기기에 저장된 설정을 브라우저에서 바로 읽고 수정합니다. 설정할 기기 종류를 고르세요.</p>
           <p id="unsupported" class="notice" hidden data-i18n>이 브라우저는 WebHID를 지원하지 않습니다. 데스크톱용 Chrome, Edge 또는 Opera에서 열어 주세요.</p>
-          <div class="welcome-actions">
-            <button class="btn-connect primary" data-i18n>기기 연결</button>
-          </div>
-          <div class="demo-actions" role="group" aria-labelledby="demo-label">
-            <span id="demo-label" data-i18n>기기 없이 둘러보기</span>
-            <button class="ghost" data-demo="logitech">Logitech G</button>
-            <button class="ghost" data-demo="vgn">VGN</button>
-            <button class="ghost" data-demo="atk">ATK</button>
-            <button class="ghost" data-demo="mchose">MCHOSE</button>
-            <button class="ghost" data-demo="via" data-i18n>VIA 키보드</button>
-            <button class="ghost" data-demo="vial" data-i18n>Vial 키보드</button>
+          <!-- 기기 종류마다 연결 버튼과 데모를 따로 둔다. 연결 창에도 그 종류의 기기만 보인다. -->
+          <div class="kind-grid">
+            <article class="kind-card" data-kind="mouse" aria-labelledby="kind-mouse">
+              <svg class="kind-icon" width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 2.5v7M6 9.5h12"/></svg>
+              <h3 id="kind-mouse" data-i18n>마우스</h3>
+              <p class="hint" data-i18n>Logitech G, VGN, ATK, MCHOSE(지원 목록 기종)</p>
+              <button class="btn-connect primary" data-kind="mouse" data-i18n>마우스 연결</button>
+              <div class="demo-actions" role="group" aria-labelledby="demo-mouse">
+                <span id="demo-mouse" data-i18n>기기 없이 둘러보기</span>
+                <button class="ghost" data-demo="logitech">Logitech G</button>
+                <button class="ghost" data-demo="vgn">VGN</button>
+                <button class="ghost" data-demo="atk">ATK</button>
+                <button class="ghost" data-demo="mchose">MCHOSE</button>
+              </div>
+            </article>
+            <article class="kind-card" data-kind="keyboard" aria-labelledby="kind-keyboard">
+              <svg class="kind-icon" width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9 10h1M12 10h1M15 10h1M18 10h0M6 13h1M9 13h1M12 13h1M15 13h1M18 13h0M8 15.5h8"/></svg>
+              <h3 id="kind-keyboard" data-i18n>키보드</h3>
+              <p class="hint" data-i18n>VIA·Vial을 지원하는 QMK 키보드</p>
+              <button class="btn-connect primary" data-kind="keyboard" data-i18n>키보드 연결</button>
+              <div class="demo-actions" role="group" aria-labelledby="demo-keyboard">
+                <span id="demo-keyboard" data-i18n>기기 없이 둘러보기</span>
+                <button class="ghost" data-demo="via">VIA</button>
+                <button class="ghost" data-demo="vial">Vial</button>
+              </div>
+            </article>
           </div>
         </div>
 
@@ -79,6 +94,10 @@
           <article class="feature">
             <h3 data-i18n>프로필 편집</h3>
             <p data-i18n>DPI 단계, 보고율, 버튼 할당, 리프트오프 거리, HITS 구성까지 온보드 메모리에 직접 저장합니다.</p>
+          </article>
+          <article class="feature">
+            <h3 data-i18n>키맵과 매크로</h3>
+            <p data-i18n>키보드의 레이어별 키 할당, 매크로, 조명을 바꿉니다. Vial 키보드는 탭 댄스·콤보와 QMK 설정도 편집합니다.</p>
           </article>
           <article class="feature">
             <h3 data-i18n>마우스 테스트</h3>
@@ -100,8 +119,11 @@
 
       <section id="config-empty">
         <h2 data-i18n>연결된 기기가 없습니다</h2>
-        <p class="hint" data-i18n>프로필을 편집하려면 먼저 마우스를 연결하세요.</p>
-        <button class="btn-connect primary" data-i18n>기기 연결</button>
+        <p class="hint" data-i18n>설정을 편집하려면 먼저 마우스나 키보드를 연결하세요.</p>
+        <div class="welcome-actions">
+          <button class="btn-connect primary" data-kind="mouse" data-i18n>마우스 연결</button>
+          <button class="btn-connect primary" data-kind="keyboard" data-i18n>키보드 연결</button>
+        </div>
       </section>
 
       <section id="tester"></section>

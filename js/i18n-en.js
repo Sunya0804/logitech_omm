@@ -783,4 +783,16 @@ export default {
   "휠 한 번의 최대 단계": "Max wheel steps",
   "휠 최고 속도까지 걸리는 시간": "Time to max wheel speed",
   "압축된 정의 파일을 풀 수 없습니다 ({what}).": "Cannot decompress the definition ({what}).",
+  // ---------- 마우스·키보드 나누기 ----------
+  "마우스 설정": "Mouse settings",
+  "마우스 연결": "Connect a mouse",
+  "키보드 연결": "Connect a keyboard",
+  "기기에 저장된 설정을 브라우저에서 바로 읽고 수정합니다. 설정할 기기 종류를 고르세요.": "Read and change the settings stored on your device, right in the browser. Choose the kind of device to set up.",
+  "Logitech G, VGN, ATK, MCHOSE(지원 목록 기종)": "Logitech G, VGN, ATK, MCHOSE (listed models)",
+  "VIA·Vial을 지원하는 QMK 키보드": "QMK keyboards with VIA or Vial",
+  "키맵과 매크로": "Keymaps and macros",
+  "키보드의 레이어별 키 할당, 매크로, 조명을 바꿉니다. Vial 키보드는 탭 댄스·콤보와 QMK 설정도 편집합니다.": "Change key assignments on each layer, macros and lighting. On Vial keyboards you can also edit tap dance, combos and QMK settings.",
+  "설정을 편집하려면 먼저 마우스나 키보드를 연결하세요.": "Connect a mouse or keyboard first to edit its settings.",
+  "+ 마우스": "+ Mouse",
+  "+ 키보드": "+ Keyboard",
 };

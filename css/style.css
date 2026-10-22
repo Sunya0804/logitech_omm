@@ -210,9 +210,17 @@ ul.hint li { margin: 4px 0; }
 .demo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; color: var(--muted); font-size: 13px; }
 .demo-actions span { margin-right: 4px; }
 .demo-actions button { padding: 5px 12px; font-size: 13px; }
+/* 시작 화면의 기기 종류 두 칸 */
+.kind-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 24px; }
+.kind-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 20px 22px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.kind-card h3 { margin: 0; color: var(--text); font-size: 18px; }
+.kind-card .hint { margin: 0 0 6px; }
+.kind-card .btn-connect { padding: 10px 22px; font-size: 15px; }
+.kind-card .demo-actions { margin-top: 6px; }
+.kind-icon { width: 30px; height: 30px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 #demo-banner { width: min(984px, calc(100% - 56px)); margin: 16px auto 0; }
 .chip.demo { border-color: rgba(255, 180, 84, .45); color: var(--warn); }
-.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 16px 0 24px; }
+.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin: 16px 0 24px; }
 .feature { padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .feature h3 { margin: 0 0 6px; color: var(--text); font-size: 15px; }
 .feature p { margin: 0; color: var(--muted); font-size: 13px; }

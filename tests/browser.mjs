@@ -363,7 +363,8 @@ try {
   const saveNow = async () => {
     await page.locator('#btn-save').click();
     await page.locator('#confirm-ok').click();
-    await page.waitForFunction(() => !OMM.state.busy);
+    // 확인 창은 닫힌 다음 틱에 저장을 시작하므로, busy만 보면 시작 전에 지나칠 수 있다. 변경이 비워질 때까지 기다린다.
+    await page.waitForFunction(() => !OMM.state.busy && document.querySelector('#btn-save').disabled);
   };
   await page.locator('#views [data-view=config]').click();
   assert.equal(await page.locator('#btn-export').isVisible(), true);
@@ -688,6 +689,18 @@ try {
   assert.equal(await page.evaluate(() => OMM.viaUi.connected() && OMM.state.demo && OMM.viaUi.state.session.vialCounts.tapDance), 4);
   await page.evaluate(() => OMM.connectDemo('via'));
   assert.equal(await page.evaluate(() => OMM.viaUi.connected() && OMM.state.demo), true);
+  // 기기 종류 나누기: 키보드를 연결하면 메뉴가 「키보드 설정」이 되고 마우스 테스트는 숨는다. 마우스로 바꾸면 돌아온다.
+  assert.equal(await page.locator('#views [data-view=config]').innerText(), 'Keyboard settings');
+  assert.equal(await page.locator('#views [data-view=test]').isVisible(), false);
+  await page.locator('#btn-disconnect').click();
+  await page.locator('#views [data-view=home]').click();
+  assert.equal(await page.locator('.kind-card').count(), 2);
+  await page.locator('.kind-card[data-kind=mouse] [data-demo=logitech]').click();
+  await page.waitForFunction(() => !OMM.state.busy && OMM.logitech.connected());
+  assert.equal(await page.locator('#views [data-view=config]').innerText(), 'Mouse settings');
+  assert.equal(await page.locator('#views [data-view=test]').isVisible(), true);
+  await page.locator('#btn-disconnect').click();
+  assert.equal(await page.locator('#views [data-view=config]').innerText(), 'Device settings');
   console.log('Browser: VIA keymap/layers/encoder, staged writes, danger confirmation, layout, showIf/custom save, ASCII macro, backup, matrix polling, definition loading, protocol 11, demo, English and 390px passed.');
   await page.evaluate(() => OMM.setLang('ko'));
   assert.deepEqual(errors, []);
