@@ -74,6 +74,29 @@ export async function busy(message, fn) {
   }
 }
 
+// 진단 파일을 저장한 뒤 GitHub 이슈로 보낼지 묻고, 보내면 이슈 작성 화면을 연다. 모든 브랜드·키보드 화면이 함께 쓴다.
+// device: 기기 이름, details: 이슈 본문에 넣을 줄(개발자가 읽으므로 한국어), app: 사용자가 설정을 바꿨을 제조사 프로그램 이름
+const ISSUE_URL = 'https://github.com/Sunya0804/logitech_omm/issues/new';
+export async function offerIssue(device, details = [], { app: vendorApp = '제조사 프로그램', title = '진단' } = {}) { // i18n-ignore
+  const send = await ask(t('진단 정보 보내기'), [
+    t('진단 파일을 저장했습니다. 이 기기를 지원 목록에 추가할 수 있도록 GitHub 이슈로 보내시겠어요?'),
+    t('GitHub 계정이 필요합니다. 열리는 이슈 작성 화면에 방금 저장한 파일을 끌어다 놓고 등록하면 됩니다. 이슈는 누구나 볼 수 있습니다.'),
+  ], t('이슈 작성 화면 열기'));
+  if (!send) return false;
+  // 이슈 본문은 개발자가 읽으므로 한국어로 둔다.
+  const body = [
+    `기기: ${device}`, // i18n-ignore
+    ...details,
+    `GOMM 주소: ${location.origin}${location.pathname}`, // i18n-ignore
+    '',
+    '아래에 진단 파일(.json)을 끌어다 놓아 첨부해 주세요.', // i18n-ignore
+    '',
+    `추가로 알려 줄 내용(잘못 표시되는 값, ${vendorApp}에서 바꾼 설정, 저장이 실제로 반영됐는지 등):`, // i18n-ignore
+  ].join('\n');
+  window.open(`${ISSUE_URL}?title=${encodeURIComponent(`[${title}] ${device}`)}&body=${encodeURIComponent(body)}`, '_blank', 'noopener');
+  return true;
+}
+
 export function download(data, suffix, name) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
   h('a', { href: url, download: `${String(name).replace(/[^\w-]+/g, '_')}-${suffix}.json` }).click();

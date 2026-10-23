@@ -155,7 +155,23 @@ try {
   assert.match(rejected[0], /호환되지 않는 백업/);
   assert.match(rejected[1], /쓸 수 없는 값/);
   assert.equal(rejected[2], false);
-  await page.evaluate(async () => { ({ MockCompxDevice: window.MockCompxDevice } = await import('/js/mock-compx.js')); await OMM.connectCompx([new MockCompxDevice()]); });
+  // 지원 목록에 없는 ATK 기종: 진단 파일을 저장하면 「지원 요청」 이슈를 열지 묻고, 연결은 하지 않는다.
+  await page.evaluate(async () => {
+    ({ MockCompxDevice: window.MockCompxDevice } = await import('/js/mock-compx.js'));
+    window.opened = []; window.realOpen = window.open; window.open = (url) => { window.opened.push(url); return null; };
+    window.unknownDone = OMM.connectCompx([new MockCompxDevice({ vendorId: OMM.compx.VENDOR_ATK, productName: 'ATK Unknown', cid: 0x7e, mid: 0x7f })]);
+  });
+  const unknownSaved = page.waitForEvent('download');
+  await page.locator('#confirm-ok').click();
+  await unknownSaved;
+  await page.locator('#confirm-ok').click();
+  await page.waitForFunction(() => window.opened.length === 1);
+  const unknownIssue = new URL(await page.evaluate(() => window.opened[0]));
+  assert.equal(unknownIssue.searchParams.get('title'), '[지원 요청] ATK Unknown');
+  assert.match(unknownIssue.searchParams.get('body'), /기기 식별값: 126,127[\s\S]*연결 결과: ATK Unknown: 아직 지원하지 않는 기종/);
+  await page.evaluate(async () => { await window.unknownDone; window.open = window.realOpen; });
+  assert.equal(await page.evaluate(() => OMM.compxUi.connected()), false);
+  await page.evaluate(async () => { await OMM.connectCompx([new MockCompxDevice()]); });
   assert.equal(await page.evaluate(() => OMM.compxUi.connected()), true);
   assert.equal(await page.locator('#sidebar .profile').count(), 4);
   // 배터리 갱신: 깨어 있으면 새 값을 보이고, 절전 중이면 깨우지 않고 직전 값을 두며, 다른 작업 중에는 묻지 않는다.
@@ -345,6 +361,28 @@ try {
   await page.locator('#btn-disconnect').click();
   await page.locator('#views [data-view=home]').click();
   assert.equal(await page.locator('#demo-banner').isVisible(), false);
+  // 진단 정보를 저장하면 어느 브랜드든 GitHub 이슈로 보낼지 묻고, 보내면 기기 이름과 식별 정보를 채운 이슈 작성 화면을 연다.
+  const checkIssue = async (name, detail) => {
+    await page.locator('#views [data-view=config]').click();
+    await page.evaluate(() => { window.opened = []; window.open = (url) => { window.opened.push(url); return null; }; });
+    const saved = page.waitForEvent('download');
+    await page.locator('#btn-diagnostics').click();
+    // Logitech은 메모리 전체를 읽기 전에 한 번 묻는다
+    if (name === 'GOMM Demo Mouse S') await page.locator('#confirm-ok').click();
+    await saved;
+    await page.locator('#confirm-ok').click();
+    await page.waitForFunction(() => window.opened.length === 1);
+    const url = new URL(await page.evaluate(() => window.opened[0]));
+    assert.equal(url.origin + url.pathname, 'https://github.com/Sunya0804/logitech_omm/issues/new');
+    assert.equal(url.searchParams.get('title'), `[진단] ${name}`);
+    const body = url.searchParams.get('body');
+    assert.ok(body.startsWith(`기기: ${name}\n`), body);
+    assert.match(body, detail);
+  };
+  await page.locator('[data-demo=via]').click();
+  await page.waitForFunction(() => !OMM.state.busy && OMM.state.demo);
+  await checkIssue(await page.evaluate(() => OMM.viaUi.state.session.def.name), /USB ID: [0-9A-F]{4}:[0-9A-F]{4}\n프로토콜: VIA \d+/);
+  const issueDetail = { logitech: /프로필 형식: /, atk: /USB ID: 373B:[0-9A-F]{4}\n기기 식별값: \d+,\d+[\s\S]*ATK HUB/, mchose: /USB ID: [0-9A-F]{4}:[0-9A-F]{4}\n제품군: [\s\S]*M HUB/, vgn: /USB ID: [0-9A-F]{4}:[0-9A-F]{4}\n기기 식별값: [\s\S]*VGN HUB/ };
   for (const [kind, name] of [['logitech', 'GOMM Demo Mouse S'], ['atk', 'ATK A9 Ultra'], ['mchose', 'MCHOSE K7 Ultra'], ['vgn', 'VGN Demo Mouse']]) {
     if (await page.locator('#btn-disconnect').isVisible()) await page.locator('#btn-disconnect').click();
     await page.locator('#views [data-view=home]').click();
@@ -352,6 +390,7 @@ try {
     await page.waitForFunction(() => !OMM.state.busy && OMM.state.demo);
     assert.match(await page.locator('#device').innerText(), new RegExp(`데모[\\s\\S]*${name.replace('+', '\\+')}`));
     assert.equal(await page.locator('#demo-banner').isVisible(), true);
+    await checkIssue(name, issueDetail[kind]);
   }
 
   // VGN 백업: 내보낸 뒤 기기 값을 바꿔 저장하고, 백업을 불러와 저장하면 원래 값으로 돌아오는지

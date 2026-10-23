@@ -6,7 +6,7 @@ import * as M from './macro.js';
 import { stopRecording, macroSummary, macroEditor as editorPanel } from './macro-editor.js';
 import { MODE, FEATURE, HidppError, Hidpp, OnboardProfiles, WebHidTransport } from './hidpp.js';
 import { t, num } from './i18n.js';
-import { $, h, toast, ask, busy, download, choice, tabs, tabPanel, tile, field, shell } from './ui.js';
+import { $, h, toast, ask, busy, download, offerIssue, choice, tabs, tabPanel, tile, field, shell } from './ui.js';
 
 // 실기기로 읽어 본 프로필 형식: 4는 PRO X Wireless, 5는 G502 X PLUS, 7은 PRO X 2 DEX. 1~3은 같은 구조다.
 // 8(SUPERSTRIKE)은 직접 읽어 보지는 못했지만 공개된 실기기 덤프와 구조가 일치한다.
@@ -23,7 +23,6 @@ const DEFAULT_DPI_RANGE = { min: 100, max: 25600, step: 50 };
 const ROM_BASE = 0x0100;
 // 기기가 아날로그 버튼의 단계 수를 알려 주지 않을 때 쓰는 값 (PRO X2 SUPERSTRIKE의 G HUB 기준)
 const DEFAULT_ANALOG_CAPS = { actuationMax: 10, hapticMax: 5, rtMax: 5 };
-const ISSUE_URL = 'https://github.com/Sunya0804/logitech_omm/issues/new';
 // 해석할 수 있는 매크로 형식 번호 (js/macro.js)
 const MACRO_FORMAT = 1;
 
@@ -425,21 +424,9 @@ export async function exportDiagnostics() {
   });
   if (!done) return;
   download(diag, 'diagnostics', st.name);
-  const send = await ask(t('진단 정보 보내기'), [
-    t('진단 파일을 저장했습니다. 이 기기를 지원 목록에 추가할 수 있도록 GitHub 이슈로 보내시겠어요?'),
-    t('GitHub 계정이 필요합니다. 열리는 이슈 작성 화면에 방금 저장한 파일을 끌어다 놓고 등록하면 됩니다. 이슈는 누구나 볼 수 있습니다.'),
-  ], t('이슈 작성 화면 열기'));
-  if (!send) return;
-  // 이슈 본문은 개발자가 읽으므로 한국어로 둔다.
-  const body = [
-    `기기: ${diag.device}`,
-    `프로필 형식: ${diag.onboard.profileFormatId} (${diag.detectedLayout || '알 수 없는 구조'})`,
-    '',
-    '아래에 진단 파일(.json)을 끌어다 놓아 첨부해 주세요.', // i18n-ignore
-    '',
-    '추가로 알려 줄 내용(잘못 표시되는 값, G HUB에서 바꾼 설정 등):', // i18n-ignore
-  ].join('\n');
-  window.open(`${ISSUE_URL}?title=${encodeURIComponent(`[진단] ${diag.device}`)}&body=${encodeURIComponent(body)}`, '_blank', 'noopener');
+  await offerIssue(diag.device, [
+    `프로필 형식: ${diag.onboard.profileFormatId} (${diag.detectedLayout || '알 수 없는 구조'})`, // i18n-ignore
+  ], { app: 'G HUB' });
 }
 
 export async function importBackup(file) {

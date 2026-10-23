@@ -4,7 +4,7 @@ import * as C from './compx.js';
 import * as X from './compx-macro.js';
 import { stopRecording, macroSummary, macroEditor } from './macro-editor.js';
 import { t, num } from './i18n.js';
-import { h, choice, stepper, toast, busy, ask, download, tabs, tabPanel, tile, field, app, shell } from './ui.js';
+import { h, choice, stepper, toast, busy, ask, download, offerIssue, tabs, tabPanel, tile, field, app, shell } from './ui.js';
 
 const DIAG_LENGTH = 256;
 
@@ -132,15 +132,29 @@ async function offerDiagnostics(devices, dev, reason) {
     reason,
     t('이 기종을 지원 목록에 추가하는 데 필요한 진단 정보를 파일로 저장할 수 있습니다. 기기에서 값을 읽기만 하고 아무것도 쓰지 않습니다.'),
   ], t('진단 파일 저장'));
-  if (ok) download(await collectDiagnostics(devices, dev), 'diagnostics', devices[0].productName || 'device');
+  if (ok) {
+    const diag = await collectDiagnostics(devices, dev);
+    download(diag, 'diagnostics', devices[0].productName || 'device');
+    await offerIssue(diag.productName || t('이 기기'), [...issueDetails(diag), `연결 결과: ${reason}`], { app: hubName(diag), title: '지원 요청' }); // i18n-ignore
+  }
   throw new Error(reason);
 }
 
 export async function exportDiagnostics() {
   let diag;
   const done = await busy(t('진단 정보 읽는 중…'), async () => { diag = await collectDiagnostics(cx.dev.devices, cx.dev); });
-  if (done) download(diag, 'diagnostics', deviceName());
+  if (!done) return;
+  download(diag, 'diagnostics', deviceName());
+  await offerIssue(deviceName(), issueDetails(diag), { app: hubName(diag) });
 }
+
+// 이슈 본문에 넣을 식별 정보. 개발자가 읽으므로 한국어로 둔다.
+const issueDetails = (diag) => [
+  `USB ID: ${diag.vendorId}:${diag.productId}`.toUpperCase(),
+  diag.identity ? `기기 식별값: ${diag.identity.cid},${diag.identity.mid}` : '기기 식별값: 읽지 못함', // i18n-ignore
+  ...(diag.error ? [`읽기 오류: ${diag.error}`] : []), // i18n-ignore
+];
+const hubName = (diag) => (parseInt(diag.vendorId, 16) === C.VENDOR_ATK ? 'ATK HUB' : 'VGN HUB');
 
 export async function connect(devices) {
   const dev = new C.CompxDevice(devices);

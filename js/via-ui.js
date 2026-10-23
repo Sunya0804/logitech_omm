@@ -9,7 +9,7 @@ import { encodeMacro } from './via-macro.js';
 import { stepsToExpression, expressionToSteps } from './via-layout-file.js';
 import { CODE_TO_USAGE } from './keys.js';
 import { macroEditor, macroSummary, stopRecording, isRecording } from './macro-editor.js';
-import { h, tabs, tabPanel, field, tile, app, shell, busy, ask, toast, download } from './ui.js';
+import { h, tabs, tabPanel, field, tile, app, shell, busy, ask, toast, download, offerIssue } from './ui.js';
 import { t } from './i18n.js';
 
 export { filters };
@@ -645,10 +645,15 @@ export async function importBackup(file) {
   try { const json = JSON.parse(await file.text()); if (state.session === s) { s.importBackup(json); shell.refresh(); } }
   catch (e) { toast(e.message, 'error'); }
 }
-export function exportDiagnostics() {
+export async function exportDiagnostics() {
   const s = state.session;
   if (!s) return;
   download({ protocol: s.protocol, vial: s.vial, layers: s.layers, matrix: { rows: s.def.rows, cols: s.def.cols }, firmware: s.firmware,
     id: hexId(s.def.vendorId, s.def.productId), definition: { name: s.def.name, source: sourceText() },
     keymap: s.orig.keymap.map((c) => c.toString(16).padStart(4, '0')), unsupported: s.def.menus.unsupported }, 'via-diagnostics', s.def.name);
+  await offerIssue(s.def.name, [
+    `USB ID: ${hexId(s.def.vendorId, s.def.productId)}`,
+    `프로토콜: ${s.vial ? `Vial ${s.vial.protocol}` : `VIA ${s.protocol}`}`, // i18n-ignore
+    `정의 파일: ${sourceText() || '알 수 없음'}`, // i18n-ignore
+  ], { app: s.vial ? 'Vial' : 'VIA' });
 }

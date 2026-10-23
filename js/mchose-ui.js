@@ -1,7 +1,7 @@
 // MCHOSE(mchose.js) 기기의 설정 화면. 연결할 때는 읽기만 하고, 사용자가 M HUB와 값을 대조한 뒤 편집을 연다.
 import { filters, catalog, createClient, changes, saveChanges, knownStatus, editableSnapshot } from './mchose.js';
 import { t, num } from './i18n.js';
-import { h, stepper, toast, busy, ask, download, tabs, tabPanel, tile, field, app, shell } from './ui.js';
+import { h, stepper, toast, busy, ask, download, offerIssue, tabs, tabPanel, tile, field, app, shell } from './ui.js';
 
 export { filters, catalog };
 export const state = { client: null, original: null, work: null, unlocked: false, stale: false, tab: 'overview' };
@@ -57,15 +57,22 @@ export async function save() {
 }
 export function revert() { state.work = clone(state.original); shell.refresh(); }
 export async function exportDiagnostics() {
+  let diag;
   const done = await busy(t('MCHOSE 진단 정보 읽는 중…'), async () => {
     const status = await state.client.readStatus();
     const d = state.client.device;
-    download({ type: 'omm-web-mchose-diagnostics', version: 1, exportedAt: new Date().toISOString(),
+    diag = { type: 'omm-web-mchose-diagnostics', version: 1, exportedAt: new Date().toISOString(),
       vendorId: d.vendorId, productId: d.productId, productName: d.productName,
-      collections: d.collections, family: state.client.family, status,
-    }, 'diagnostics', status.name);
+      collections: d.collections, family: state.client.family, status };
+    download(diag, 'diagnostics', status.name);
   });
-  if (done) toast(t('읽기 전용 진단 정보를 저장했습니다.'), 'ok');
+  if (!done) return;
+  const hex = (n) => n.toString(16).padStart(4, '0').toUpperCase();
+  await offerIssue(diag.status.name || diag.productName, [
+    `USB ID: ${hex(diag.vendorId)}:${hex(diag.productId)}`,
+    `제품군: ${diag.family}`, // i18n-ignore
+    `펌웨어: ${diag.status.firmware?.join(', ') || '알 수 없음'}`, // i18n-ignore
+  ], { app: 'M HUB' });
 }
 
 // 백업: 기기에 저장된 지금 프로필의 편집 가능한 값. 불러올 때는 이 기기의 선택지와 범위에 맞는 값만 화면의 편집본에 옮기고,
