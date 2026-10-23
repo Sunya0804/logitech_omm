@@ -16,7 +16,8 @@ const LENGTH = 90;
 const STATUS = { busy: 1, ok: 2, unsupported: 5 };
 const RATES_1K = [125, 500, 1000];
 const RATES_8K = [125, 500, 1000, 2000, 4000, 8000];
-const SLEEP = [60, 120, 300, 600, 900];
+// 자동 절전: 1~15분, 1분 단위 (실기기 Viper V3 Pro가 180초로 답함)
+const SLEEP = Array.from({ length: 15 }, (_, i) => (i + 1) * 60);
 const MAX_STAGES = 5;
 
 // 제품 ID: { 이름, 무선, DPI 상한, 보고율, 고속 보고율 명령 사용, 트랜잭션 ID, 저장 위치 바이트, 보고율 확정용 트랜잭션 ID }
