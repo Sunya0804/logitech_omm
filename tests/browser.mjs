@@ -486,6 +486,31 @@ try {
   await saveNow();
   assert.equal(await page.evaluate(() => OMM.mchoseUi.state.original.dpiStages[0]), 1200);
 
+  // WLMouse·Razer 데모: 공용 상태 화면으로 열리고, 값을 대조한 뒤 편집해 저장하면 가상 기기에 기록된다. 진단 정보는 이슈로 보낼 수 있다.
+  for (const [kind, ui, name, issue, stored] of [
+    ['wlmouse', 'wlmouseUi', 'WLMouse Beast X', /USB ID: 36A7:A883\n기종: Beast X[\s\S]*WLMouse HUB/, (d) => d.settings.stages[0][0]],
+    ['razer', 'razerUi', 'Razer Viper V3 Pro', /USB ID: 1532:00C1\n기종: Viper V3 Pro[\s\S]*Razer Synapse/, (d) => d.stages[0][0]],
+  ]) {
+    await page.locator('#btn-disconnect').click();
+    await page.locator('#views [data-view=home]').click();
+    await page.locator(`[data-demo=${kind}]`).click();
+    await page.waitForFunction((u) => !OMM.state.busy && OMM[u].connected(), ui);
+    assert.match(await page.locator('#device').innerText(), new RegExp(`데모[\\s\\S]*${name}`));
+    await page.locator('#views [data-view=config]').click();
+    assert.equal(await page.locator('.editor-head h2').innerText(), name);
+    await page.locator('.mchose-unlock input').check();
+    await page.getByRole('tab', { name: '성능', exact: true }).click();
+    const first = page.getByRole('spinbutton', { name: '1단계 DPI', exact: true });
+    await first.fill('500');
+    await first.dispatchEvent('change');
+    if (kind === 'wlmouse') await page.locator('[data-toggle=motionSync]').uncheck();
+    await saveNow();
+    assert.equal(await page.evaluate((u) => OMM[u].state.original.dpiStages[0], ui), 500);
+    assert.equal(await page.evaluate(`(${stored})(OMM.${ui}.state.client.device)`), 500);
+    if (kind === 'wlmouse') assert.equal(await page.evaluate(() => OMM.wlmouseUi.state.client.device.settings.flags[0x89]), 0);
+    await checkIssue(name, issue);
+  }
+
   // DPI·각도 측정 계산: 10 cm에 1,600 DPI 마우스면 6,299 카운트, 오른쪽이 1° 올라가면 +1°
   const measured = await page.evaluate(() => {
     const counts = 1600 * 10 / 2.54, rad = Math.PI / 180;

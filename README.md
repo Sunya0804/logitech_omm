@@ -1,6 +1,6 @@
 # GOMM — Global Onboard Memory Manager
 
-마우스에 저장된 설정을 브라우저에서 읽고 수정하는 정적 웹앱입니다. Logitech G, VGN·ATK 및 MCHOSE 지원 기종의 설정을 다룹니다.
+마우스에 저장된 설정을 브라우저에서 읽고 수정하는 정적 웹앱입니다. Logitech G, VGN·ATK, MCHOSE, WLMouse, Razer 지원 기종의 설정을 다룹니다.
 WebHID로 기기와 직접 통신하며(Logitech은 HID++ 2.0의 기능 `0x8100`, VGN은 16바이트 설정 프로토콜), 빌드나 서버 측 코드가 없습니다.
 
 ## 실행
@@ -25,10 +25,10 @@ G HUB나 공식 OMM이 실행 중이면 HID++ 통신이 충돌할 수 있으니 
 - HITS 구성(좌·우 버튼의 작동점, 래피드 트리거, 클릭 햅틱) 편집 — 형식 8. 저장하면 현재 값에도 바로 적용
 - 버튼 할당(기본 / G-Shift): 마우스 버튼, 키보드 단축키, 미디어 키, 특수 기능, 사용 안 함, 매크로
 - 매크로(매크로 형식 1): 기존 매크로의 키·대기·마우스 버튼 단계 표시, 키보드 녹화·대기·마우스 클릭 추가로 편집. **매크로 기록은 실기기로 아직 확인하지 않았습니다** (아래 「매크로」)
-- 프로필 백업 내보내기 / 불러오기 (JSON). VGN·ATK·MCHOSE는 지금 프로필의 편집 가능한 설정을 같은 기종끼리 주고받음
+- 프로필 백업 내보내기 / 불러오기 (JSON). VGN·ATK·MCHOSE·WLMouse·Razer는 지금 프로필의 편집 가능한 설정을 같은 기종끼리 주고받음
 - 마우스 테스트: 더블클릭(채터링)·버튼·휠 역방향 튐 검사, 보고율 측정, DPI·센서 기울기 실측(자를 대고 정한 거리만큼 이동). 기기 연결 없이 어떤 마우스에서도 동작
-- 데모 모드: 홈의 「기기 없이 둘러보기」에서 Logitech·VGN·ATK·MCHOSE 가상 기기로 편집·저장을 시험. 가상 기기는 메모리 안에서만 동작하며 WebHID에 접근하지 않음(MCHOSE는 실기기에서 읽어 둔 응답을 재생)
-- 진단 정보 내보내기: 기능 목록과 온보드 메모리 전체를 읽기 전용으로 덤프 (새 기기 지원용). Logitech·VGN·ATK·MCHOSE·키보드 모두 저장한 뒤 GitHub 이슈로 보낼지 묻고, 보내면 기기 이름과 USB ID 등을 채운 이슈 작성 화면을 엶. 지원 목록에 없는 ATK 기종도 연결을 거절할 때 같은 방법으로 「지원 요청」 이슈를 열 수 있음
+- 데모 모드: 홈의 「기기 없이 둘러보기」에서 Logitech·VGN·ATK·MCHOSE·WLMouse·Razer 가상 기기로 편집·저장을 시험. 가상 기기는 메모리 안에서만 동작하며 WebHID에 접근하지 않음(MCHOSE는 실기기에서 읽어 둔 응답을 재생)
+- 진단 정보 내보내기: 기능 목록과 온보드 메모리 전체를 읽기 전용으로 덤프 (새 기기 지원용). Logitech·VGN·ATK·MCHOSE·WLMouse·Razer·키보드 모두 저장한 뒤 GitHub 이슈로 보낼지 묻고, 보내면 기기 이름과 USB ID 등을 채운 이슈 작성 화면을 엶. 지원 목록에 없는 ATK 기종도 연결을 거절할 때 같은 방법으로 「지원 요청」 이슈를 열 수 있음
 - 화면 언어: 한국어·영어 (브라우저 언어로 고르고, 왼쪽 아래 선택 상자로 바꿀 수 있음). 키보드만으로 조작할 수 있고 화면 읽기 프로그램용 이름표를 붙였습니다.
 
 조명(LED)은 지원하지 않으며, 기존 값은 그대로 보존됩니다.
@@ -113,6 +113,16 @@ M HUB(제조사 웹 드라이버)가 쓰는 세 가지 통신 방식(A5 1세대�
 `js/mock-mchose.json`은 두 실기기의 읽기 전용 응답입니다.
 테스트의 쓰기 명령은 가상 기기의 메모리에서만 실행됩니다.
 
+## WLMouse·Razer 마우스
+
+[OpenMouse](https://github.com/OpenMouse-Project/openmouse)가 공개한 통신 규격을 사실 정보로 참고해 직접 구현했습니다(js/wlmouse.js, js/razer.js, 코드는 가져오지 않음).
+화면은 MCHOSE와 같은 공용 화면(js/status-ui.js)을 쓰며, 연결할 때는 읽기만 하고 제조사 프로그램과 값을 대조한 뒤 편집을 엽니다.
+**두 브랜드 모두 이 프로젝트에서 실기기로 확인하지 않았습니다.** 출처와 범위는 [WLMouse·Razer 문서](docs/razer-wlmouse.md)를 참고하세요.
+
+- WLMouse: DPI 단계·현재 단계, 보고율, 리프트오프, 디바운스, 자동 절전, 모션 싱크·각도 스냅·리플 컨트롤·고속·터보 모드, 센서 각도. Beast X 4K는 다른 규격이라 아직 지원하지 않습니다.
+- Razer: DPI 단계·현재 단계, 보고율, 무선 기종의 자동 절전. OpenMouse가 실기기로 확인한 기종만 연결합니다.
+- **Chrome·Edge 153 이상은 Windows에서 Razer 설정 채널을 막습니다.** 이 경우 브라우저만으로는 Razer를 설정할 수 없고, 연결할 때 그 이유를 알려 줍니다.
+
 ## VIA 키보드
 
 VIA(QMK) 키보드의 키맵·레이아웃 옵션·매크로·조명/설정 메뉴를 다루고, 키 테스트(스위치 매트릭스)를 보여 줍니다.
@@ -187,14 +197,16 @@ HITS 값의 허용 범위는 기기가 알려 주는 단계 수(HID++ `0x1B0C`)�
 | `js/compx-ui.js` | VGN·ATK 기기의 설정 화면 |
 | `js/compx-macro.js` | ATK 온보드 매크로 칸 해석/기록 |
 | `js/mchose.js`, `js/mchose-models.js`, `js/mchose-actions.js` | MCHOSE 드라이버, 기종표, 버튼 동작 표 |
-| `js/mchose-ui.js` | MCHOSE 기기의 설정 화면 |
+| `js/status-ui.js`, `js/status-save.js` | MCHOSE·WLMouse·Razer가 함께 쓰는 설정 화면과 저장·검증 |
+| `js/mchose-ui.js`, `js/wlmouse-ui.js`, `js/razer-ui.js` | 브랜드별 화면 설정(공용 화면에 브랜드 이름·드라이버를 넘김) |
+| `js/wlmouse.js`, `js/razer.js` | WLMouse·Razer 드라이버와 기종표 |
 | `js/tester.js` | 마우스 테스트 화면과 판정 로직 |
 | `js/device-images.js` | 홈 카드 제품 사진 목록 |
 | `js/via.js`, `js/via-keycodes.js`, `js/via-definition.js`, `js/via-macro.js` | VIA 키보드 통신, 키 코드 이름표, 정의 파일 해석, 매크로 버퍼 |
 | `js/via-layout-file.js` | VIA 앱 레이아웃 파일(.layout.json)과 매크로 식 변환 |
 | `js/via-session.js` | VIA 키보드의 읽은 값·편집본·저장·백업 (화면이 쓰는 창구) |
 | `js/xz.js`, `js/vial-settings.js`, `js/vial-demo.js` | Vial 정의 파일 압축 풀기, QMK 설정 항목표, 시험·데모용 Vial 정의 파일 |
-| `js/mock.js`, `js/mock-compx.js`, `js/mock-via.js` | 데모·테스트용 가상 기기 (데모를 고를 때만 불러옴) |
+| `js/mock.js`, `js/mock-compx.js`, `js/mock-via.js`, `js/mock-wlmouse.js`, `js/mock-razer.js` | 데모·테스트용 가상 기기 (데모를 고를 때만 불러옴) |
 
 브랜드별 화면(`*-ui.js`)은 같은 모양의 함수 묶음(`connect`, `render`, `save`, `exportBackup` 등)을 내보내고, `app.js`가 연결된 기기에 맞는 것을 고릅니다.
 

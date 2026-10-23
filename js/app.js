@@ -1,9 +1,11 @@
 // 앱의 뼈대: 기기 연결과 브랜드별 화면 선택, 홈·상태 줄·저장 막대, 데모, 언어 전환.
-// 브랜드별 화면(logitech-ui, compx-ui, mchose-ui)은 같은 모양의 함수 묶음을 내보낸다.
+// 브랜드별 화면(logitech-ui, compx-ui, mchose-ui, wlmouse-ui, razer-ui, via-ui)은 같은 모양의 함수 묶음을 내보낸다.
 import * as C from './compx.js';
 import * as logitech from './logitech-ui.js';
 import * as compxUi from './compx-ui.js';
 import * as mchoseUi from './mchose-ui.js';
+import * as wlmouseUi from './wlmouse-ui.js';
+import * as razerUi from './razer-ui.js';
 import * as viaUi from './via-ui.js';
 import { hasViaInterface } from './via.js';
 import * as tester from './tester.js';
@@ -12,7 +14,7 @@ import { deviceImage } from './device-images.js';
 import { t, num, translateDom, setLang, getLang, onLangChange, LANGS } from './i18n.js';
 import { $, h, app, shell, toast, busy } from './ui.js';
 
-const UIS = [logitech, compxUi, mchoseUi, viaUi];
+const UIS = [logitech, compxUi, mchoseUi, wlmouseUi, razerUi, viaUi];
 const active = () => UIS.find((ui) => ui.connected()) || null;
 
 // ---------- 연결 ----------
@@ -35,7 +37,7 @@ async function disconnect() {
 
 // 기기 종류별 연결 창 필터. 키보드는 VIA 통신 칸이 있는 기기만 보인다.
 const FILTERS = {
-  mouse: () => [...logitech.filters, ...C.filters, ...mchoseUi.filters],
+  mouse: () => [...logitech.filters, ...C.filters, ...mchoseUi.filters, ...wlmouseUi.filters, ...razerUi.filters],
   keyboard: () => viaUi.filters,
 };
 
@@ -51,6 +53,8 @@ async function requestConnect(kind = 'mouse') {
     // 제품 ID까지 아는 마우스 경로를 먼저 고른다. 제조사 ID만 같은 키보드는 VIA로 보낸다.
     if (mchoseUi.filters.some((f) => f.vendorId === vendor && (f.productId !== undefined ? picked.some((d) => d.productId === f.productId) : !via))) return await connectWith(mchoseUi, picked, t('MCHOSE 기기 읽는 중…'));
     if (C.VENDOR_IDS.includes(vendor) && !via) return await connectWith(compxUi, picked, t('기기 읽는 중…'));
+    if (wlmouseUi.filters.some((f) => f.vendorId === vendor) && !via) return await connectWith(wlmouseUi, picked, t('{brand} 설정 읽는 중…', { brand: 'WLMouse' }));
+    if (razerUi.filters.some((f) => f.vendorId === vendor && picked.some((d) => d.productId === f.productId))) return await connectWith(razerUi, picked, t('{brand} 설정 읽는 중…', { brand: 'Razer' }));
     if (via) return await connectWith(viaUi, picked, t('키보드 정보 읽는 중…'));
     await connectWith(logitech, logitech.transportFor(picked), t('기기 검색 중…'));
   } catch (e) {
@@ -103,6 +107,12 @@ async function connectDemo(kind) {
       const json = demoDefinition();
       const dev = new MockViaDevice({ vendorId: json.vendorId, productId: json.productId, productName: json.name, rows: 5, cols: 16, custom: { '1,1': [1] } });
       await connectWith({ ...viaUi, connect: (devices, msg) => viaUi.connect(devices, msg, json) }, [dev], t('키보드 정보 읽는 중…'));
+    } else if (kind === 'wlmouse') {
+      const { MockWLMouse } = await import('./mock-wlmouse.js');
+      await connectWith(wlmouseUi, [new MockWLMouse()], t('{brand} 설정 읽는 중…', { brand: 'WLMouse' }));
+    } else if (kind === 'razer') {
+      const { MockRazer } = await import('./mock-razer.js');
+      await connectWith(razerUi, [new MockRazer()], t('{brand} 설정 읽는 중…', { brand: 'Razer' }));
     } else if (kind === 'logitech') {
       const { MockTransport } = await import('./mock.js');
       await connectWith(logitech, new MockTransport('analog'), t('기기 검색 중…'));
@@ -335,10 +345,12 @@ function init() {
 
 // 개발·테스트용 손잡이: 콘솔과 tests/browser.mjs가 쓴다.
 window.OMM = {
-  state: app, compx: C, logitech, compxUi, mchoseUi, viaUi, tester, ui: { refresh: render },
+  state: app, compx: C, logitech, compxUi, mchoseUi, wlmouseUi, razerUi, viaUi, tester, ui: { refresh: render },
   connect: (transport) => connectWith(logitech, transport, t('기기 검색 중…')),
   connectCompx: (devices) => connectWith(compxUi, devices, t('기기 읽는 중…')),
   connectMchose: (devices) => connectWith(mchoseUi, devices, t('MCHOSE 기기 읽는 중…')),
+  connectWLMouse: (devices) => connectWith(wlmouseUi, devices, t('{brand} 설정 읽는 중…', { brand: 'WLMouse' })),
+  connectRazer: (devices) => connectWith(razerUi, devices, t('{brand} 설정 읽는 중…', { brand: 'Razer' })),
   connectVia: (devices, json) => connectWith({ ...viaUi, connect: (arg, msg) => viaUi.connect(arg, msg, json) }, devices, t('키보드 정보 읽는 중…')),
   connectDemo, setLang, pollBattery,
 };
